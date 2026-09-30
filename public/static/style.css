@@ -1,0 +1,15 @@
+/* Virtual Office custom styles */
+.desk-working { animation: pulse-soft 2s ease-in-out infinite; }
+@keyframes pulse-soft {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.35); }
+  50% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
+}
+.desk-error { animation: pulse-err 1.2s ease-in-out infinite; }
+@keyframes pulse-err {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+.nav-btn.active { background: rgba(255, 122, 69, 0.9); }
+.fade-in { animation: fadeIn 0.25s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.status-dot { width: 10px; height: 10px; border-radius: 9999px; display: inline-block; }

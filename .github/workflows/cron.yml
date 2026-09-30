@@ -1,0 +1,27 @@
+# AI Virtual Office 毎時tick
+# 毎時実行し、サーバー側(JST基準)で処理を振り分け:
+#   - JST 5時台: フルパイプライン(Alex→Riko→Kai→Yuto→Aki→note→Rui→Nana、1日1回ガード付き)
+#   - 毎時: Sora自動予約投稿(承認済み+投稿時刻到来分をXへ。Xキー未設定なら何もしない)
+#
+# 【有効化手順】このファイルを .github/workflows/cron.yml に配置し、
+# リポジトリの Settings → Secrets and variables → Actions に CRON_SECRET を登録
+name: hourly-tick
+
+on:
+  schedule:
+    - cron: '10 * * * *'   # 毎時10分 (GitHub Actionsのschedule遅延を吸収するため0分は避ける)
+  workflow_dispatch: {}
+
+jobs:
+  run-tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run hourly tick
+        run: |
+          HTTP_CODE=$(curl -s -o /tmp/res.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 900 \
+            "https://0c9c4d00-0596-4d2b-8bc9-5a2b11a4709d.vip.gensparksite.com/api/cron/run")
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/res.json
+          [ "$HTTP_CODE" = "200" ] || exit 1

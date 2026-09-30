@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+
+# Wrangler local state (local D1/SQLite)
+.wrangler/
+
+# Env / secrets
+.env
+.dev.vars
+
+# PM2 / logs
+.pm2/
+logs/
+*.log
+
+# Backups
+*.backup
+*.bak
+*.tar.gz
+*.zip
