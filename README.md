@@ -27,7 +27,7 @@
   - 🔎 **Riko競合リサーチ**: 毎週月曜にAI副業系noteの売れ筋・価格相場・タイトル傾向を自動分析し、Alexの週次計画に自動反映(KPI画面にレポート表示)
 
 ## URL
-- **本番**: https://0c9c4d00-0596-4d2b-8bc9-5a2b11a4709d.vip.gensparksite.com
+- **本番**: https://xautomation-59a.pages.dev
 - **GitHub**: https://github.com/daichi763/xautomation
 - **サンドボックスプレビュー(開発用)**: https://3000-i94l1sj6tl7trvmsyql1g-3844e1b6.sandbox.novita.ai
 

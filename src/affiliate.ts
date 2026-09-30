@@ -61,7 +61,7 @@ export function embedAffiliateLinks(text: string, links: AffiliateLink[], clickB
 
 // クリック計測リダイレクトのベースURL解決
 // app_settings 'app_base_url' があればそれを使用、なければ本番URL固定値
-export const DEFAULT_APP_BASE_URL = 'https://0c9c4d00-0596-4d2b-8bc9-5a2b11a4709d.vip.gensparksite.com'
+export const DEFAULT_APP_BASE_URL = 'https://xautomation-59a.pages.dev'
 
 export async function resolveClickBase(db: D1Database): Promise<string> {
   try {
