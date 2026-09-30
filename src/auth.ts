@@ -1,7 +1,7 @@
 // アプリ内認証(メールアドレス+パスワード / PBKDF2 + セッションCookie)
 // Workers対応: Web Crypto APIのみ使用
 
-export const ALLOWED_EMAILS = ['d.omori@dissectera.com']
+export const ALLOWED_EMAILS = ['n0101r2000@gmail.com']
 const SESSION_DAYS = 30
 const PBKDF2_ITERATIONS = 100_000
 
