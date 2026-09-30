@@ -1,5 +1,5 @@
 {
-  "name": "webapp",
+  "name": "xautomation",
   "type": "module",
   "scripts": {
     "dev": "vite",

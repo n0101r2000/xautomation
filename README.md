@@ -179,8 +179,8 @@
 ## 開発
 ```bash
 npm run build                                          # ビルド
-npx wrangler d1 migrations apply webapp-production --local  # マイグレーション
-npx wrangler d1 execute webapp-production --local --file=./seed.sql  # シード
+npx wrangler d1 migrations apply xautomation-db --local  # マイグレーション
+npx wrangler d1 execute xautomation-db --local --file=./seed.sql  # シード
 pm2 start ecosystem.config.cjs                         # 起動(port 3000)
 ```
 

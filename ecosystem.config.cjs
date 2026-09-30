@@ -1,9 +1,9 @@
 module.exports = {
   apps: [
     {
-      name: 'webapp',
+      name: 'xautomation',
       script: 'npx',
-      args: 'wrangler pages dev dist --d1=webapp-production --r2=webapp-bucket --local --ip 0.0.0.0 --port 3000',
+      args: 'wrangler pages dev dist --d1=xautomation-db --r2=xautomation-images --local --ip 0.0.0.0 --port 3000',
       env: {
         NODE_ENV: 'development',
         PORT: 3000
