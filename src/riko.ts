@@ -1,7 +1,7 @@
 // Riko(企画・リサーチ)実巡回ロジック
-// RSS/Reddit収集 → gpt-5(推論medium) でネタ選定・日本向けアレンジ → topic_candidates 投入
+// RSS/Reddit収集 → Opus 5.5(effort medium) でネタ選定・日本向けアレンジ → topic_candidates 投入
 import { collectRss, collectReddit, type RawItem } from './sources'
-import { callOpenAI } from './llm'
+import { callClaude } from './llm'
 
 export const RIKO_SYSTEM = `あなたはRiko、日本向け「海外AI副業の検証部屋」メディアの企画・リサーチ担当です。
 海外の副業・AIツール情報から、日本のX/noteフォロワー(副業に興味がある20-40代)に刺さるネタを選定します。
@@ -64,13 +64,13 @@ export async function runRikoCrawl(db: D1Database, apiKey: string): Promise<Riko
     return { ok: true, collected: items.length, inserted: 0, topics: [], errors, costUsd: 0, error: '新規記事なし(全て既出)' }
   }
 
-  // 3. gpt-5(推論medium) でネタ選定 — 品質優先方針
+  // 3. Opus 5.5(effort medium) でネタ選定 — 品質優先方針
   const listText = fresh
     .map((it, i) => `[${i}] (${it.source}${it.score ? ` / ${it.score}pt` : ''}) ${it.title}\n${it.summary ? it.summary.slice(0, 200) : ''}`)
     .join('\n\n')
-  const llm = await callOpenAI(
+  const llm = await callClaude(
     apiKey,
-    'gpt-5',
+    'claude-opus-5-5',
     RIKO_SYSTEM,
     `本日収集した海外記事一覧です。日本向けネタとして有望なものを選定してください(目標10件):\n\n${listText}`,
     16000, // 推論(medium)トークンも上限に含まれるため余裕を持たせる
@@ -125,7 +125,7 @@ export async function runRikoCrawl(db: D1Database, apiKey: string): Promise<Riko
 // ============================================================
 // Riko週次競合リサーチ(Phase D): 売れているAI副業系noteの傾向を収集し
 // Alexの週次計画+月次まとめの価格・タイトル戦略の材料にする
-// ソース: Yahoo!リアルタイム検索(無料)で「note 有料 AI」系の話題投稿を収集 → gpt-5で傾向分析
+// ソース: Yahoo!リアルタイム検索(無料)で「note 有料 AI」系の話題投稿を収集 → Opus 5.5で傾向分析
 // ============================================================
 export interface CompetitorResearchResult {
   ok: boolean
@@ -175,9 +175,9 @@ export async function runRikoCompetitorResearch(db: D1Database, apiKey: string):
 
     const material = uniq.map((t, i) => `${i + 1}. [@${t.screenName} RT${t.rtCount}/返信${t.replyCount}] ${String(t.text).slice(0, 200)}`).join('\n')
 
-    const llm = await callOpenAI(
+    const llm = await callClaude(
       apiKey,
-      'gpt-5',
+      'claude-opus-5-5',
       `あなたは「Riko」— 「Mさん / 海外AI副業の検証部屋」の企画・リサーチ担当です。X上で観測された「AI副業系noteの販売・購入に関する生の声」から、自アカウントのnote販売戦略に活かせる競合トレンドレポートを作成します。
 
 ## レポート構成(Markdown・800字以内)

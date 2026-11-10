@@ -1032,14 +1032,14 @@ async function renderQA() {
     <div class="flex items-center gap-2 text-xs">
       <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full ${llmStatus.connected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
         <span class="w-2 h-2 rounded-full ${llmStatus.connected ? 'bg-emerald-500' : 'bg-slate-400'}"></span>
-        OpenAI ${llmStatus.connected ? `接続中 (${llmStatus.keyHint})` : '未接続'}
+        Claude ${llmStatus.connected ? `接続中 (${llmStatus.keyHint})` : '未接続'}
       </span>
     </div>
 
     <!-- Yuto AI執筆スタジオ -->
     <section id="yuto-studio" class="bg-white rounded-xl shadow p-4 space-y-3 border-2 border-brand-orange/30">
-      <h3 class="font-bold text-sm text-brand-navy"><i class="fas fa-pen-nib mr-1 text-brand-orange"></i>Yuto AI執筆スタジオ <span class="text-[10px] font-normal text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">gpt-5</span></h3>
-      <p class="text-xs text-slate-500">テーマを入れると、Yuto(GPT-5)が注釈・円換算・法令ルールを守った投稿を執筆します。執筆後は自動でキーワードQAも実行。</p>
+      <h3 class="font-bold text-sm text-brand-navy"><i class="fas fa-pen-nib mr-1 text-brand-orange"></i>Yuto AI執筆スタジオ <span class="text-[10px] font-normal text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">Claude Opus 5.5</span></h3>
+      <p class="text-xs text-slate-500">テーマを入れると、Yuto(Claude Opus 5.5)が注釈・円換算・法令ルールを守った投稿を執筆します。執筆後は自動でキーワードQAも実行。</p>
       <div class="flex gap-2 flex-wrap">
         <input id="yuto-theme" class="flex-1 min-w-[240px] border border-slate-300 rounded-lg p-2.5 text-sm" placeholder="例: 海外で流行しているFaceless YouTube(顔出しなし動画)の始め方">
         <select id="yuto-slot" class="border border-slate-300 rounded-lg p-2 text-sm">
@@ -1061,7 +1061,7 @@ async function renderQA() {
       </label>
       <div class="flex gap-2 flex-wrap">
         <button id="qa-check-btn" class="bg-brand-navy text-white px-5 py-2.5 rounded-lg text-sm font-bold hover:opacity-90"><i class="fas fa-bolt mr-1"></i>キーワードチェック(即時)</button>
-        <button id="qa-llm-btn" class="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-bold hover:opacity-90" ${llmStatus.connected ? '' : 'disabled'}><i class="fas fa-brain mr-1"></i>Mio 実AIチェック <span class="text-[10px] opacity-80">(gpt-5-mini)</span></button>
+        <button id="qa-llm-btn" class="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-bold hover:opacity-90" ${llmStatus.connected ? '' : 'disabled'}><i class="fas fa-brain mr-1"></i>Mio 実AIチェック <span class="text-[10px] opacity-80">(Claude Opus 5.5)</span></button>
       </div>
     </section>
     <section id="qa-result"></section>
@@ -1132,7 +1132,7 @@ async function renderQA() {
     } catch (e) {
       box.innerHTML = `<div class="fade-in bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">エラー: ${esc(e.response?.data?.error || e.message)}</div>`;
     } finally {
-      btn.disabled = false; btn.innerHTML = '<i class="fas fa-brain mr-1"></i>Mio 実AIチェック <span class="text-[10px] opacity-80">(gpt-5-mini)</span>';
+      btn.disabled = false; btn.innerHTML = '<i class="fas fa-brain mr-1"></i>Mio 実AIチェック <span class="text-[10px] opacity-80">(Claude Opus 5.5)</span>';
     }
   });
 
@@ -1288,10 +1288,10 @@ async function renderImages() {
 
   $app.innerHTML = `
   <div class="fade-in max-w-5xl mx-auto space-y-6">
-    <h2 class="font-bold text-lg text-brand-navy"><i class="fas fa-image mr-2"></i>Aki 画像スタジオ <span class="text-[10px] font-normal text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">gpt-image-2</span></h2>
-    <p class="text-sm text-slate-500">タイトルを入れるとAkiがブランドガイド(ネイビー×オレンジ)準拠の投稿用画像を生成。生成後はMio(GPT-5)が画像内の誤字・法令リスク・権利リスクを自動審査します。1枚あたり約$0.05〜0.10(画像生成+QA)。</p>
+    <h2 class="font-bold text-lg text-brand-navy"><i class="fas fa-image mr-2"></i>Aki 画像スタジオ <span class="text-[10px] font-normal text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full border border-slate-300">OFF</span></h2>
+    <p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">画像生成は現在OFFです(Claudeは画像を生成できないため)。過去に生成した画像の閲覧と、Mio(Claude)による画像QAの再実行のみ利用できます。</p>
 
-    <section id="image-generator" class="bg-white rounded-xl shadow p-4 space-y-3 border-2 border-brand-orange/30">
+    <section id="image-generator" class="hidden bg-white rounded-xl shadow p-4 space-y-3 border-2 border-brand-orange/30">
       <div class="grid sm:grid-cols-3 gap-3">
         <input id="img-title" class="sm:col-span-2 border border-slate-300 rounded-lg p-2.5 text-sm" placeholder="画像内テキスト(例: AI副業 検証レポート)">
         <select id="img-purpose" class="border border-slate-300 rounded-lg p-2 text-sm">
@@ -1384,24 +1384,25 @@ async function renderCost() {
   const t = data.totals;
   const fmtUsd = (v) => '$' + v.toFixed(2);
   const fmtJpy = (v) => '¥' + Math.round(v).toLocaleString();
-  const saving = t.oldClaudeMonthlyUsd - t.monthlyUsd;
-  const savingPct = Math.round((saving / t.oldClaudeMonthlyUsd) * 100);
+  // Maxプラン付属の月額APIクレジット
+  const creditUsd = 100;
+  const creditPct = Math.round((t.monthlyUsd / creditUsd) * 100);
 
   const modelBadge = (m) => {
-    const colors = { 'gpt-5': 'bg-purple-100 text-purple-700 border-purple-300', 'gpt-5-mini': 'bg-blue-100 text-blue-700 border-blue-300', 'gpt-5-nano': 'bg-emerald-100 text-emerald-700 border-emerald-300' };
+    const colors = { 'claude-opus-5-5': 'bg-purple-100 text-purple-700 border-purple-300' };
     return `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold border ${colors[m] || 'bg-slate-100 text-slate-600'}">${m}</span>`;
   };
 
   app.innerHTML = `
   <div class="fade-in space-y-6">
     <div class="flex items-center justify-between flex-wrap gap-2">
-      <h2 class="text-xl font-bold text-brand-navy"><i class="fas fa-microchip mr-2 text-brand-orange"></i>AIモデル構成 & コスト試算 (OpenAI移行プラン)</h2>
+      <h2 class="text-xl font-bold text-brand-navy"><i class="fas fa-microchip mr-2 text-brand-orange"></i>AIモデル構成 & コスト試算 (Claude Opus 5.5)</h2>
       <span class="text-xs text-slate-400">為替: $1 = ¥${data.usdJpy}</span>
     </div>
 
     <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm">
-      <div class="font-bold text-emerald-800 mb-1"><i class="fas fa-key mr-1"></i>OpenAI APIキーで運用可能です</div>
-      <p class="text-emerald-700 text-xs leading-relaxed">Anthropicキーは不要。全ワーカーをOpenAI GPT-5ファミリー(gpt-5 / gpt-5-mini / gpt-5-nano)に置き換えた構成です。API呼び出しはOpenAI互換エンドポイント1本に統一されるため、実装もシンプルになります。</p>
+      <div class="font-bold text-emerald-800 mb-1"><i class="fas fa-key mr-1"></i>Claude API (ANTHROPIC_API_KEY) で運用しています</div>
+      <p class="text-emerald-700 text-xs leading-relaxed">全ワーカーをClaude Opus 5.5に統一し、作業の重さに応じてeffort(low / medium / high)を切り替えています。Maxプランに付く月$100のAPIクレジットの範囲内での運用を想定しています。画像生成はOFFです。</p>
     </div>
 
     <!-- サマリーカード -->
@@ -1417,14 +1418,14 @@ async function renderCost() {
         <div class="text-xs text-slate-500">${fmtJpy(t.monthlyJpy)}/月</div>
       </div>
       <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-        <div class="text-xs text-slate-400 mb-1">旧Claude構成 (月額)</div>
-        <div class="text-2xl font-bold text-slate-400 line-through">${fmtUsd(t.oldClaudeMonthlyUsd)}</div>
-        <div class="text-xs text-slate-500">${fmtJpy(t.oldClaudeMonthlyUsd * data.usdJpy)}/月</div>
+        <div class="text-xs text-slate-400 mb-1">Max付属APIクレジット (月額)</div>
+        <div class="text-2xl font-bold text-brand-navy">${fmtUsd(creditUsd)}</div>
+        <div class="text-xs text-slate-500">翌月への繰越なし</div>
       </div>
       <div class="bg-white rounded-xl shadow-sm border-2 border-emerald-300 p-4">
-        <div class="text-xs text-emerald-600 mb-1 font-bold">OpenAI移行で削減</div>
-        <div class="text-2xl font-bold text-emerald-600">-${savingPct}%</div>
-        <div class="text-xs text-emerald-600">${fmtJpy(saving * data.usdJpy)}/月 お得</div>
+        <div class="text-xs text-emerald-600 mb-1 font-bold">クレジット使用率 (試算)</div>
+        <div class="text-2xl font-bold text-emerald-600">${creditPct}%</div>
+        <div class="text-xs text-emerald-600">残り ${fmtUsd(Math.max(creditUsd - t.monthlyUsd, 0))}/月</div>
       </div>
     </div>
 
@@ -1501,7 +1502,7 @@ async function renderCost() {
 
   // チャート描画
   if (costChart) { costChart.destroy(); costChart = null; }
-  const colorFor = (m) => m === 'gpt-5' ? '#9333ea' : m === 'gpt-5-mini' ? '#2563eb' : '#059669';
+  const colorFor = () => '#9333ea';
   costChart = new Chart(document.getElementById('cost-chart'), {
     type: 'bar',
     data: {

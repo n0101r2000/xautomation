@@ -1,11 +1,11 @@
 // P1-4 リプライ自動返信 (Sora + Yuto + Mio)
 // 毎時cronから呼ばれる2つの処理:
-//  1. collectMentionsAndDraft: メンション回収($0.001/件)→ 返信下書き生成(gpt-5-mini)→ QA → ゲート②へ
+//  1. collectMentionsAndDraft: メンション回収($0.001/件)→ 返信下書き生成(Opus 5.5)→ QA → ゲート②へ
 //  2. publishApprovedReplies: 承認済み返信を自動送信($0.015/件)
 // X APIキー未設定時は何もしない (エラーにしない)
 
 import { getXCredentials, fetchMyProfile, fetchMyMentions, postTweet, xWeightedLength, X_WEIGHT_LIMIT, isTransientXError, type XCredentials, type XMention } from './x-api'
-import { callOpenAI } from './llm'
+import { callClaude } from './llm'
 import { runQaCheck } from './qa-rules'
 
 export interface ReplyCollectResult {
@@ -125,8 +125,8 @@ export async function collectMentionsAndDraft(
       const dup = await db.prepare('SELECT reply_id FROM x_replies WHERE mention_tweet_id = ? LIMIT 1').bind(m.tweetId).first()
       if (dup) continue
 
-      // 返信下書き生成 (gpt-5-mini: 短文なので軽量モデルで十分)
-      const llm = await callOpenAI(apiKey, 'gpt-5-mini', REPLY_SYSTEM,
+      // 返信下書き生成 (Opus 5.5: 短文なので軽量モデルで十分)
+      const llm = await callClaude(apiKey, 'claude-opus-5-5', REPLY_SYSTEM,
         `以下のメンションに返信してください。\n\n▓送信者: @${m.authorUsername}\n▓本文:\n${m.text.slice(0, 500)}`,
         2000, 'low')
       result.costUsd += llm.costUsd || 0
@@ -147,7 +147,7 @@ export async function collectMentionsAndDraft(
 
       // 文字数ガード: weighted 280(日本語約140字)超は送信時に必ず失敗するため、一度だけ短縮リトライ
       if (xWeightedLength(draft) > X_WEIGHT_LIMIT) {
-        const shorten = await callOpenAI(apiKey, 'gpt-5-mini', REPLY_SYSTEM,
+        const shorten = await callClaude(apiKey, 'claude-opus-5-5', REPLY_SYSTEM,
           `以下の返信案は長すぎます。意味を保ったまま120字以内に短縮してください。出力は短縮後の本文のみ。\n\n${draft}`,
           2000, 'low')
         result.costUsd += shorten.costUsd || 0

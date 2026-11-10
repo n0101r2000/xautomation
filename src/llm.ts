@@ -1,5 +1,7 @@
-// OpenAI API 呼び出しヘルパー (Cloudflare Workers対応: fetch APIのみ使用)
+// Claude API 呼び出しヘルパー (Anthropic公式SDK / Cloudflare Workers対応)
+import Anthropic from '@anthropic-ai/sdk'
 import type { ModelId } from './model-plan'
+import { MODEL_PRICING } from './model-plan'
 
 export interface LlmUsage {
   prompt_tokens: number
@@ -16,61 +18,69 @@ export interface LlmResult {
   error?: string
 }
 
-import { MODEL_PRICING } from './model-plan'
-
 function calcCost(model: ModelId, usage: LlmUsage): number {
   const p = MODEL_PRICING[model]
   if (!p) return 0
   return (usage.prompt_tokens / 1_000_000) * p.input + (usage.completion_tokens / 1_000_000) * p.output
 }
 
-export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high'
+// Claude の effort。短文生成は low、長文・分析・選定は medium/high を呼び側で指定
+export type ReasoningEffort = 'low' | 'medium' | 'high'
 
-export async function callOpenAI(
+// Opus 5.5 は思考が常にオンで、思考トークンも max_tokens に含まれる。短文でも途中で切れないよう下限を設ける
+const MIN_MAX_TOKENS = 8000
+
+export async function callClaude(
   apiKey: string,
   model: ModelId,
   systemPrompt: string,
-  userPrompt: string,
-  maxTokens = 2000,
-  reasoningEffort: ReasoningEffort = 'low',
+  userContent: string | Anthropic.Beta.BetaContentBlockParam[],
+  maxTokens = 8000,
+  effort: ReasoningEffort = 'low',
 ): Promise<LlmResult> {
   if (!apiKey) {
-    return { ok: false, content: '', model, error: 'OPENAI_API_KEY が未設定です。シークレット登録が必要です。' }
+    return { ok: false, content: '', model, error: 'ANTHROPIC_API_KEY が未設定です。シークレット登録が必要です。' }
   }
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        max_completion_tokens: maxTokens,
-        // GPT-5系は推論トークンを消費する。短文生成は low、長文・分析・選定は medium/high を呼び側で指定
-        reasoning_effort: reasoningEffort,
-      }),
+    const client = new Anthropic({ apiKey })
+    // 長文生成でもHTTPタイムアウトしないようストリーミングで受け、finalMessage()で完成形を取得
+    const stream = client.beta.messages.stream({
+      model,
+      max_tokens: Math.max(maxTokens, MIN_MAX_TOKENS),
+      // 安全分類器で拒否された場合、Anthropic推奨のモデルでサーバー側が自動で再実行する
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      output_config: { effort },
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }],
     })
-    const data: any = await res.json()
-    if (!res.ok) {
-      return { ok: false, content: '', model, error: data?.error?.message || `HTTP ${res.status}` }
+    const msg = await stream.finalMessage()
+    if (msg.stop_reason === 'refusal') {
+      return { ok: false, content: '', model: msg.model, error: `Claudeが応答を拒否しました (${msg.stop_details?.category ?? '理由不明'})` }
     }
-    const usage: LlmUsage = data.usage
-    return {
-      ok: true,
-      content: data.choices?.[0]?.message?.content || '',
-      model: data.model || model,
-      usage,
-      costUsd: usage ? calcCost(model, usage) : undefined,
+    const content = msg.content.map((b) => (b.type === 'text' ? b.text : '')).join('')
+    if (msg.stop_reason === 'max_tokens' && !content) {
+      return { ok: false, content: '', model: msg.model, error: '出力が上限トークンに達し、本文が生成されませんでした' }
     }
+    const inputTokens = msg.usage.input_tokens + (msg.usage.cache_read_input_tokens ?? 0) + (msg.usage.cache_creation_input_tokens ?? 0)
+    const usage: LlmUsage = {
+      prompt_tokens: inputTokens,
+      completion_tokens: msg.usage.output_tokens,
+      total_tokens: inputTokens + msg.usage.output_tokens,
+    }
+    return { ok: true, content, model: msg.model, usage, costUsd: calcCost(model, usage) }
   } catch (e: any) {
+    if (e instanceof Anthropic.AuthenticationError) {
+      return { ok: false, content: '', model, error: 'ANTHROPIC_API_KEY が無効です' }
+    } else if (e instanceof Anthropic.RateLimitError) {
+      return { ok: false, content: '', model, error: 'レート制限中です。時間をおいて再実行してください' }
+    } else if (e instanceof Anthropic.APIError) {
+      return { ok: false, content: '', model, error: `Claude API エラー ${e.status ?? ''}: ${e.message}` }
+    }
     return { ok: false, content: '', model, error: e?.message || 'ネットワークエラー' }
   }
 }
+
 
 // ============ ワーカー用システムプロンプト (要約版) ============
 

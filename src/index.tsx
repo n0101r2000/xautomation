@@ -3,8 +3,8 @@ import { cors } from 'hono/cors'
 import { runQaCheck, FORBIDDEN_RULES } from './qa-rules'
 import { embedAffiliateLinks, resolveClickBase, suggestAnnotations, type AffiliateLink, type GlossaryEntry } from './affiliate'
 import { computeCostPlan } from './model-plan'
-import { callOpenAI, YUTO_SYSTEM, MIO_SYSTEM } from './llm'
-import { buildImagePrompt, generateImage, qaImage, IMAGE_SIZE, IMAGE_COST_USD, type ImagePurpose } from './image-gen'
+import { callClaude, YUTO_SYSTEM, MIO_SYSTEM } from './llm'
+import { buildImagePrompt, generateImage, qaImage, IMAGE_SIZE, IMAGE_COST_USD, IMAGE_GENERATION_ENABLED, IMAGE_GENERATION_DISABLED_MESSAGE, type ImagePurpose } from './image-gen'
 import { getXCredentials, xWeightedLength, X_WEIGHT_LIMIT } from './x-api'
 import { runRikoCrawl } from './riko'
 import { runDailyPipeline, runHourlyTick, runSelfRepost, SLOT_TABLE } from './cron'
@@ -16,7 +16,7 @@ import { getAuthState, registerUser, loginUser, logoutUser, sessionCookie, clear
 type Bindings = {
   DB: D1Database
   R2: R2Bucket
-  OPENAI_API_KEY?: string
+  ANTHROPIC_API_KEY?: string
   X_API_KEY?: string
   X_API_SECRET?: string
   X_ACCESS_TOKEN?: string
@@ -282,14 +282,14 @@ app.post('/api/notes/:id/publish', async (c) => {
 // Riko競合リサーチの手動実行(通常は毎週月曜に自動実行)
 app.post('/api/reports/competitor/run', async (c) => {
   const { runRikoCompetitorResearch } = await import('./riko')
-  const result = await runRikoCompetitorResearch(c.env.DB, c.env.OPENAI_API_KEY || '')
+  const result = await runRikoCompetitorResearch(c.env.DB, c.env.ANTHROPIC_API_KEY || '')
   return c.json(result, result.ok ? 200 : 502)
 })
 
 // 月次まとめnote(¥500)の手動生成(通常は毎月1日に自動実行。テスト・再生成用)
 app.post('/api/notes/monthly/run', async (c) => {
   const { runMonthlySummaryNote } = await import('./note-writer')
-  const result = await runMonthlySummaryNote(c.env.DB, c.env.OPENAI_API_KEY || '')
+  const result = await runMonthlySummaryNote(c.env.DB, c.env.ANTHROPIC_API_KEY || '')
   return c.json(result, result.ok ? 200 : 502)
 })
 
@@ -324,26 +324,26 @@ app.post('/api/notes/:id/stats', async (c) => {
 // KPI
 // ============================================================
 
-// AIモデル構成 & コスト試算 (OpenAI移行プラン)
+// AIモデル構成 & コスト試算 (Claude Opus 5.5)
 app.get('/api/models/cost', (c) => {
   return c.json(computeCostPlan())
 })
 
 // ============================================================
-// 実LLM接続 (OpenAI GPT-5ファミリ)
+// 実LLM接続 (Claude API)
 // ============================================================
 
 // LLM接続状態
 app.get('/api/llm/status', (c) => {
-  const key = c.env.OPENAI_API_KEY
+  const key = c.env.ANTHROPIC_API_KEY
   return c.json({
     connected: !!key,
-    provider: 'OpenAI',
+    provider: 'Anthropic',
     keyHint: key ? `sk-...${key.slice(-4)}` : null,
   })
 })
 
-// Yuto(ライター/gpt-5)に新規投稿を執筆させる
+// Yuto(ライター/Opus 5.5)に新規投稿を執筆させる
 app.post('/api/llm/write', async (c) => {
   const { DB } = c.env
   const { theme, slot, save } = await c.req.json<{ theme: string; slot?: number; save?: boolean }>()
@@ -355,7 +355,7 @@ app.post('/api/llm/write', async (c) => {
 
   const userPrompt = `以下のテーマでX投稿を1本執筆してください。\n\nテーマ: ${theme}\n${slot ? `投稿枠: 枠${slot}` : ''}\n\n▓参考: 既存の用語注釈集(同じ固有名詞はこの注釈を使う)\n${glossaryNote}`
 
-  const result = await callOpenAI(c.env.OPENAI_API_KEY || '', 'gpt-5', YUTO_SYSTEM, userPrompt, 3000)
+  const result = await callClaude(c.env.ANTHROPIC_API_KEY || '', 'claude-opus-5-5', YUTO_SYSTEM, userPrompt, 3000)
   if (!result.ok) return c.json({ error: result.error }, 502)
 
   // キーワードQAも自動実行
@@ -368,7 +368,7 @@ app.post('/api/llm/write', async (c) => {
       "INSERT INTO x_posts (post_id, slot_number, scheduled_at, body, approval_status, qa_status, qa_issues) VALUES (?, ?, datetime('now', '+1 day'), ?, 'pending', ?, ?)"
     ).bind(savedPostId, slot || 1, result.content, qa.status, JSON.stringify(qa.issues)).run()
     await DB.prepare("INSERT INTO worker_logs (worker_name, action, status, output_json, finished_at) VALUES ('yuto', 'llm_write', 'success', ?, CURRENT_TIMESTAMP)")
-      .bind(`OpenAI(gpt-5)で執筆: ${theme.slice(0, 40)}`).run()
+      .bind(`Claude(Opus 5.5)で執筆: ${theme.slice(0, 40)}`).run()
   }
 
   return c.json({
@@ -381,13 +381,13 @@ app.post('/api/llm/write', async (c) => {
   })
 })
 
-// Mio(QA/gpt-5-mini)に法務チェックさせる(キーワードエンジン+LLMの二重チェック)
+// Mio(QA/Opus 5.5)に法務チェックさせる(キーワードエンジン+LLMの二重チェック)
 app.post('/api/llm/qa', async (c) => {
   const { text } = await c.req.json<{ text: string }>()
   if (!text?.trim()) return c.json({ error: 'テキストを入力してください' }, 400)
 
   const keywordQa = runQaCheck(text, /\bhttps?:\/\//.test(text))
-  const result = await callOpenAI(c.env.OPENAI_API_KEY || '', 'gpt-5-mini', MIO_SYSTEM, `以下の投稿文を審査してください:\n\n${text}`, 2000)
+  const result = await callClaude(c.env.ANTHROPIC_API_KEY || '', 'claude-opus-5-5', MIO_SYSTEM, `以下の投稿文を審査してください:\n\n${text}`, 2000)
   if (!result.ok) return c.json({ error: result.error, keywordQa }, 502)
 
   let llmVerdict: any = null
@@ -408,7 +408,7 @@ app.post('/api/llm/qa', async (c) => {
 })
 
 // ============================================================
-// Aki: 画像生成 (gpt-image-2 → R2保存) + Mio: 画像QA
+// Aki: 画像生成 (現在OFF) + Mio: 画像QA
 // ============================================================
 
 // 生成済み画像一覧
@@ -430,13 +430,14 @@ app.get('/api/images/:id/file', async (c) => {
 
 // Akiに画像を生成させる → R2保存 → Mio画像QA自動実行
 app.post('/api/images/generate', async (c) => {
+  if (!IMAGE_GENERATION_ENABLED) return c.json({ error: IMAGE_GENERATION_DISABLED_MESSAGE }, 503)
   const { DB, R2 } = c.env
   const { purpose, title, extra, post_id, skip_qa } = await c.req.json<{ purpose: ImagePurpose; title: string; extra?: string; post_id?: string; skip_qa?: boolean }>()
   if (!title?.trim()) return c.json({ error: 'タイトルテキストを入力してください' }, 400)
   const p: ImagePurpose = ['thumbnail', 'infographic', 'note_cover'].includes(purpose) ? purpose : 'thumbnail'
 
   const prompt = buildImagePrompt(p, title, extra)
-  const gen = await generateImage(c.env.OPENAI_API_KEY || '', prompt, IMAGE_SIZE[p])
+  const gen = await generateImage(c.env.ANTHROPIC_API_KEY || '', prompt, IMAGE_SIZE[p])
   if (!gen.ok) return c.json({ error: gen.error }, 502)
 
   // R2保存
@@ -449,7 +450,7 @@ app.post('/api/images/generate', async (c) => {
   let qa: any = { verdict: 'pending' }
   let qaCost = 0
   if (!skip_qa) {
-    const qaRes = await qaImage(c.env.OPENAI_API_KEY || '', gen.b64!, title)
+    const qaRes = await qaImage(c.env.ANTHROPIC_API_KEY || '', gen.b64!, title)
     if (qaRes.ok) {
       qa = { verdict: qaRes.verdict, issues: qaRes.issues || [], summary: qaRes.summary, text_readable: qaRes.text_readable }
       qaCost = qaRes.costUsd || 0
@@ -486,7 +487,7 @@ app.post('/api/images/:id/qa', async (c) => {
   }
   b64 = btoa(b64)
 
-  const qaRes = await qaImage(c.env.OPENAI_API_KEY || '', b64, img.title_text || '')
+  const qaRes = await qaImage(c.env.ANTHROPIC_API_KEY || '', b64, img.title_text || '')
   if (!qaRes.ok) return c.json({ error: qaRes.error }, 502)
 
   await DB.prepare('UPDATE generated_images SET qa_status = ?, qa_issues = ? WHERE image_id = ?')
@@ -552,14 +553,14 @@ app.post('/api/posts/:id/rewrite', async (c) => {
     : '(特になし。より読みやすく・法令遵守で磨いてください)'
 
   const userPrompt = `以下の投稿文を、QA指摘を解消するように書き直してください。元のネタ・構成は活かすこと。\n\n▓元の投稿:\n${post.body}\n\n▓QA指摘:\n${issueText}`
-  const result = await callOpenAI(c.env.OPENAI_API_KEY || '', 'gpt-5', YUTO_SYSTEM, userPrompt, 3000)
+  const result = await callClaude(c.env.ANTHROPIC_API_KEY || '', 'claude-opus-5-5', YUTO_SYSTEM, userPrompt, 3000)
   if (!result.ok) return c.json({ error: result.error }, 502)
 
   const qa = runQaCheck(result.content, result.content.includes('#PR'))
   await DB.prepare('UPDATE x_posts SET body = ?, qa_status = ?, qa_issues = ? WHERE post_id = ?')
     .bind(result.content, qa.status, JSON.stringify(qa.issues), id).run()
   await DB.prepare("INSERT INTO worker_logs (worker_name, action, status, output_json, finished_at) VALUES ('yuto', 'llm_rewrite', 'success', ?, CURRENT_TIMESTAMP)")
-    .bind(`OpenAI(gpt-5)でリライト: ${id}`).run()
+    .bind(`Claude(Opus 5.5)でリライト: ${id}`).run()
 
   return c.json({ post_id: id, body: result.content, qa, model: result.model, usage: result.usage, costUsd: result.costUsd })
 })
@@ -781,14 +782,14 @@ app.get('/api/glossary', async (c) => {
 
 // 手動パイプライン実行(UIボタンから。認証ミドルウェアで保護済み)
 app.post('/api/pipeline/run', async (c) => {
-  const result = await runDailyPipeline(c.env.DB, c.env.R2, c.env.OPENAI_API_KEY || '', c.env as any)
+  const result = await runDailyPipeline(c.env.DB, c.env.R2, c.env.ANTHROPIC_API_KEY || '', c.env as any)
   return c.json(result, result.ok ? 200 : 502)
 })
 
 // ── 手動トリガ: メンション回収→返信下書き生成(通常はJST 8/12/18/22時の自動実行) ──
 app.post('/api/replies/collect', async (c) => {
   const { DB } = c.env
-  const result = await collectMentionsAndDraft(DB, String(c.env.OPENAI_API_KEY || ''), c.env as any)
+  const result = await collectMentionsAndDraft(DB, String(c.env.ANTHROPIC_API_KEY || ''), c.env as any)
   if (!result.skippedNoCreds && (result.fetched > 0 || result.errors.length > 0)) {
     await DB.prepare(
       "INSERT INTO worker_logs (worker_name, action, status, output_json, finished_at) VALUES ('sora', 'mention_collect_manual', ?, ?, CURRENT_TIMESTAMP)",
@@ -825,7 +826,7 @@ app.post('/api/selfrepost/run', async (c) => {
 app.post('/api/riko/crawl', async (c) => {
   const { DB } = c.env
   const started = Date.now()
-  const result = await runRikoCrawl(DB, c.env.OPENAI_API_KEY || '')
+  const result = await runRikoCrawl(DB, c.env.ANTHROPIC_API_KEY || '')
   await DB.prepare(
     "INSERT INTO worker_logs (worker_name, action, status, output_json, finished_at) VALUES ('riko', 'manual_crawl', ?, ?, CURRENT_TIMESTAMP)"
   ).bind(
@@ -892,7 +893,7 @@ app.get('/api/plans/weekly', async (c) => {
 
 // Nanaレポートを手動再生成(デバッグ/即時確認用)
 app.post('/api/reports/daily/run', async (c) => {
-  const result = await runNanaReport(c.env.DB, c.env.OPENAI_API_KEY || '')
+  const result = await runNanaReport(c.env.DB, c.env.ANTHROPIC_API_KEY || '')
   return c.json(result, result.ok ? 200 : 502)
 })
 
@@ -906,7 +907,7 @@ app.get('/api/quote/candidates', async (c) => {
 // Rui日次分析を手動実行(デバッグ/即時確認用)
 app.post('/api/reports/analysis/run', async (c) => {
   const { runRuiDaily } = await import('./rui')
-  const result = await runRuiDaily(c.env.DB, c.env.OPENAI_API_KEY || '')
+  const result = await runRuiDaily(c.env.DB, c.env.ANTHROPIC_API_KEY || '')
   return c.json(result, result.ok ? 200 : 502)
 })
 

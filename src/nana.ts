@@ -1,6 +1,6 @@
 // Nana(秘書): 日次レポート生成 + 未処理タスクリマインド(指示書 L288-310 準拠)
 // 毎日パイプライン末尾に実行。通知先は当面ダッシュボード表示。
-import { callOpenAI, type LlmResult } from './llm'
+import { callClaude, type LlmResult } from './llm'
 
 export const NANA_SYSTEM = `あなたは「Nana」— AIバーチャルオフィス「Mさん / 海外AI副業の検証部屋」の秘書です。
 取締役(Mさん)に毎日の業務レポートを届けます。
@@ -104,7 +104,7 @@ export async function runNanaReport(db: D1Database, apiKey: string): Promise<Nan
 上記の事実データから300字以内の日次レポートを作成してください。
 ${result.stalePending > 0 ? `承認待ちが24時間以上滞留しています(${result.stalePending}件)。冒頭に「⚠️ リマインド」を必ず入れてください。` : '滞留はありません。'}`
 
-    const llm: LlmResult = await callOpenAI(apiKey, 'gpt-5-mini', NANA_SYSTEM, facts, 3000, 'low')
+    const llm: LlmResult = await callClaude(apiKey, 'claude-opus-5-5', NANA_SYSTEM, facts, 3000, 'low')
     if (!llm.ok) {
       result.error = `Nanaレポート生成失敗: ${llm.error}`
       return result

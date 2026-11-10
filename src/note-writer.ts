@@ -1,7 +1,7 @@
 // Yuto note記事自動執筆: 週7本(無料6・有料1)+月1本の月次まとめ
 // 価格戦略(0→1優先): 有料単発¥100 / 月次まとめ¥500(メンバーシップは当面休止)
-// 品質優先方針: noteは収益の柱のため gpt-5 + 推論high で長文品質を最大化
-import { callOpenAI, type LlmResult } from './llm'
+// 品質優先方針: noteは収益の柱のため Opus 5.5 + effort high で長文品質を最大化
+import { callClaude, type LlmResult } from './llm'
 import { runQaCheck } from './qa-rules'
 
 export const YUTO_NOTE_SYSTEM = `あなたは「Yuto」— 日本のnoteアカウント「Mさん / 海外AI副業の検証部屋」の専属ライターです。
@@ -136,7 +136,7 @@ ${recentTitles}
 ## 既存の用語注釈集(同じ固有名詞はこの注釈を使う)
 ${glossaryNote}`
 
-    const llm: LlmResult = await callOpenAI(apiKey, 'gpt-5', YUTO_NOTE_SYSTEM, userPrompt, 24000, 'high') // 推論(high)+長文本文の予算
+    const llm: LlmResult = await callClaude(apiKey, 'claude-opus-5-5', YUTO_NOTE_SYSTEM, userPrompt, 24000, 'high') // 推論(high)+長文本文の予算
     if (!llm.ok) {
       result.error = `note執筆失敗: ${llm.error}`
       return result
@@ -168,9 +168,9 @@ ${glossaryNote}`
     // Mio QA(キーワードエンジン)+1回だけ自動リライト
     let qa = runQaCheck(bodyMd, /\bhttps?:\/\//.test(bodyMd))
     if (qa.status !== 'ok') {
-      const rewrite = await callOpenAI(
+      const rewrite = await callClaude(
         apiKey,
-        'gpt-5',
+        'claude-opus-5-5',
         YUTO_NOTE_SYSTEM,
         `以下のnote記事がQAで指摘を受けました。指摘を解消しつつ構成・分量・${isPaid ? 'paywallマーカー(<!--paywall-->)' : '無料記事の形式'}を維持して書き直してください。書き直した記事全文(Markdown)のみを出力:\n\n▓指摘:\n${qa.issues.map((i) => `- ${i.law}: ${i.matched}(${i.detail})`).join('\n')}\n\n▓元の記事:\n${bodyMd}`,
         16000,
@@ -290,7 +290,7 @@ ${kpiText}
 ## Rui(分析担当)の月次レポート
 ${rui?.body_md ? String(rui.body_md).slice(0, 3000) : '(なし)'}`
 
-    const llm: LlmResult = await callOpenAI(apiKey, 'gpt-5', YUTO_NOTE_SYSTEM, userPrompt, 24000, 'high')
+    const llm: LlmResult = await callClaude(apiKey, 'claude-opus-5-5', YUTO_NOTE_SYSTEM, userPrompt, 24000, 'high')
     if (!llm.ok) {
       result.error = `月次まとめ執筆失敗: ${llm.error}`
       return result
@@ -316,8 +316,8 @@ ${rui?.body_md ? String(rui.body_md).slice(0, 3000) : '(なし)'}`
     // QA + 1回だけ自動リライト
     let qa = runQaCheck(bodyMd, /\bhttps?:\/\//.test(bodyMd))
     if (qa.status !== 'ok') {
-      const rewrite = await callOpenAI(
-        apiKey, 'gpt-5', YUTO_NOTE_SYSTEM,
+      const rewrite = await callClaude(
+        apiKey, 'claude-opus-5-5', YUTO_NOTE_SYSTEM,
         `以下の月次まとめnote記事がQAで指摘を受けました。指摘を解消しつつ構成・分量・paywallマーカー(<!--paywall-->)を維持して書き直してください。書き直した記事全文(Markdown)のみを出力:\n\n▓指摘:\n${qa.issues.map((i) => `- ${i.law}: ${i.matched}(${i.detail})`).join('\n')}\n\n▓元の記事:\n${bodyMd}`,
         20000, 'medium',
       )

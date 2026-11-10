@@ -1,6 +1,6 @@
 // Rui(分析): 日次KPI分析 + 週次(日曜)7日総括+改善提案3つ(指示書 L312-330 準拠)
-// 品質優先方針: 分析の質が改善サイクルの起点のため gpt-5 + 推論medium
-import { callOpenAI, type LlmResult } from './llm'
+// 品質優先方針: 分析の質が改善サイクルの起点のため Opus 5.5 + effort medium
+import { callClaude, type LlmResult } from './llm'
 
 export const RUI_SYSTEM = `あなたは「Rui」— AIバーチャルオフィス「Mさん / 海外AI副業の検証部屋」の分析担当です。
 X投稿とnoteのKPIデータを分析し、仮説と改善アクションを導きます。
@@ -125,9 +125,9 @@ export async function runRuiDaily(db: D1Database, apiKey: string): Promise<RuiRe
   const result: RuiResult = { ok: false, reportType: 'daily', costUsd: 0 }
   try {
     const facts = await collectKpiFacts(db, 3)
-    const llm: LlmResult = await callOpenAI(
+    const llm: LlmResult = await callClaude(
       apiKey,
-      'gpt-5',
+      'claude-opus-5-5',
       RUI_SYSTEM,
       `以下のデータをもとに【日次分析】を作成してください。\n\n${facts}`,
       12000, // 推論トークン込み
@@ -173,7 +173,7 @@ ${facts}
 
 提案は必ず3つ。実行可能な具体アクションのみ。`
 
-    const llm: LlmResult = await callOpenAI(apiKey, 'gpt-5', RUI_SYSTEM, userPrompt, 14000, 'medium') // 推論トークン込み
+    const llm: LlmResult = await callClaude(apiKey, 'claude-opus-5-5', RUI_SYSTEM, userPrompt, 14000, 'medium') // 推論トークン込み
     if (!llm.ok) {
       result.error = `Rui週次分析失敗: ${llm.error}`
       return result
@@ -289,7 +289,7 @@ ${priceTierText}
 
 データが少ない/デモ値の場合はその旨を明記した上で、立ち上げ期として妥当な戦略を提示してください。`
 
-    const llm: LlmResult = await callOpenAI(apiKey, 'gpt-5', RUI_SYSTEM, userPrompt, 16000, 'medium') // 推論トークン込み
+    const llm: LlmResult = await callClaude(apiKey, 'claude-opus-5-5', RUI_SYSTEM, userPrompt, 16000, 'medium') // 推論トークン込み
     if (!llm.ok) {
       result.error = `Rui月次分析失敗: ${llm.error}`
       return result

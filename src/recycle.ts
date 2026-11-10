@@ -5,7 +5,7 @@
 // - 同じ元投稿は一度しかリサイクルしない (recycled_from で追跡)
 // - QAを通し、通常の承認ゲート②を経由する (勝手に投稿しない)
 
-import { callOpenAI, YUTO_SYSTEM } from './llm'
+import { callClaude, YUTO_SYSTEM } from './llm'
 import { runQaCheck } from './qa-rules'
 
 export interface RecycleResult {
@@ -55,7 +55,7 @@ export async function runPostRecycle(
     result.sourceImpressions = source.impressions
 
     // Yutoリライト: 同じテーマを新しい切り口で
-    const llm = await callOpenAI(apiKey, 'gpt-5', YUTO_SYSTEM,
+    const llm = await callClaude(apiKey, 'claude-opus-5-5', YUTO_SYSTEM,
       `以下は${Math.round((Date.now() - new Date(source.published_at + 'Z').getTime()) / 86400000)}日前に投稿して反響が大きかった投稿です(インプレッション${source.impressions})。
 同じテーマを「新しい切り口」でリライトして、再投稿用の本文を1本執筆してください。
 

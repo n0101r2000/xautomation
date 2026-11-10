@@ -1,6 +1,6 @@
 // Kai(翻訳)実LLM実装 — 指示書§Kaiプロンプト準拠
 // Rikoが選定したネタの英語ソースを深掘り翻訳・要約し、Yutoの執筆入力にする
-import { callOpenAI, type LlmResult } from './llm'
+import { callClaude, type LlmResult } from './llm'
 
 export const KAI_SYSTEM = `あなたは「Mさん / 海外AI副業の検証部屋」の翻訳担当「Kai」です。
 英語一次情報を、Mさんが実際に読んで理解したかのような自然な日本語に翻訳・要約します。
@@ -76,7 +76,7 @@ export async function translateSource(apiKey: string, input: KaiInput): Promise<
 
 ${sourceText ? `▓原文(取得済み):\n${sourceText}` : `▓原文取得に失敗しました。上記タイトル・選定理由と以下の収集時要約から、確実に言える範囲のみで要約してください(推測は「〜と思われる」と明示):\n${input.source_summary || '(要約なし)'}`}`
 
-  // 品質優先方針: 翻訳の正確性が信頼の生命線のため gpt-5 + 推論medium
-  const result = await callOpenAI(apiKey, 'gpt-5', KAI_SYSTEM, userPrompt, 10000, 'medium') // 推論トークン込みの予算
+  // 品質優先方針: 翻訳の正確性が信頼の生命線のため Opus 5.5 + effort medium
+  const result = await callClaude(apiKey, 'claude-opus-5-5', KAI_SYSTEM, userPrompt, 10000, 'medium') // 推論トークン込みの予算
   return { ...result, sourceFetched: !!sourceText }
 }

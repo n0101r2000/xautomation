@@ -3,11 +3,12 @@
 // 取締役の承認はゲート②(投稿一括)・ゲート③(有料note)のみ。途中承認なし。
 import { runRikoCrawl, runRikoCompetitorResearch } from './riko'
 import { translateSource } from './kai'
-import { callOpenAI, YUTO_SYSTEM } from './llm'
+import { callClaude, YUTO_SYSTEM } from './llm'
 import { runQaCheck } from './qa-rules'
 import { runAlexWeeklyPlan, getCurrentWeekPlan } from './alex'
 import { runNoteWriter, runMonthlySummaryNote } from './note-writer'
 import { runAkiImagePlan, runAkiNoteCover, runAkiNoteDiagrams } from './aki'
+import { IMAGE_GENERATION_ENABLED } from './image-gen'
 import { runRuiDaily, runRuiWeekly, runRuiMonthly } from './rui'
 import { runNanaReport } from './nana'
 import { collectJaHotTweets, type JaHotTweet } from './sources'
@@ -403,7 +404,7 @@ ${glossaryNote}${todayFocus}${saleMode && slotDef.slot === 2 ? '\n\n▓追加指
 
     // 長文枠(4/7/10)は最大3000字の本文+推論分でトークン予算を拡大
     const isLongSlot = [4, 7, 10].includes(slotDef.slot)
-    const written = await callOpenAI(apiKey, 'gpt-5', YUTO_SYSTEM, userPrompt, isLongSlot ? 10000 : 3000, isLongSlot ? 'medium' : 'low')
+    const written = await callClaude(apiKey, 'claude-opus-5-5', YUTO_SYSTEM, userPrompt, isLongSlot ? 10000 : 3000, isLongSlot ? 'medium' : 'low')
     if (!written.ok) {
       result.yuto.errors.push(`枠${slotDef.slot}: ${written.error}`)
       continue
@@ -414,9 +415,9 @@ ${glossaryNote}${todayFocus}${saleMode && slotDef.slot === 2 ? '\n\n▓追加指
     let body = written.content
     let qa = runQaCheck(body, slotDef.slot === 8 || /\bhttps?:\/\//.test(body))
     if (qa.status !== 'ok') {
-      const rewrite = await callOpenAI(
+      const rewrite = await callClaude(
         apiKey,
-        'gpt-5',
+        'claude-opus-5-5',
         YUTO_SYSTEM,
         `以下の投稿がQAで指摘を受けました。指摘を解消しつつ同じ内容・枠の型を維持して書き直してください。書き直した本文のみを出力:\n\n▓指摘:\n${qa.issues.map((i) => `- ${i.law}: ${i.matched}(${i.detail})`).join('\n')}\n\n▓元の投稿:\n${body}`,
         isLongSlot ? 10000 : 3000,
@@ -486,7 +487,8 @@ ${glossaryNote}${todayFocus}${saleMode && slotDef.slot === 2 ? '\n\n▓追加指
   await setWorkerIdle(db, 'mio')
 
   // ========== Phase 5: Aki 画像計画(全12枠を判定→必要な枠に生成・最大8枚) → Mio画像QA → 合格分のみ添付 ==========
-  if (createdPosts.length > 0) {
+  // 画像生成OFFの間は Phase 5 / 6.6 / 6.8 を丸ごと飛ばす
+  if (IMAGE_GENERATION_ENABLED && createdPosts.length > 0) {
     try {
       await setWorkerWorking(db, 'aki', '図解画像を生成中(最大8枚)')
       const aki = await runAkiImagePlan(db, r2, apiKey, createdPosts, 8)
@@ -554,7 +556,7 @@ ${glossaryNote}${todayFocus}${saleMode && slotDef.slot === 2 ? '\n\n▓追加指
   }
 
   // ========== Phase 6.6: Aki noteカバー画像生成(購入率・読了率向上) ==========
-  if (createdArticleId) {
+  if (IMAGE_GENERATION_ENABLED && createdArticleId) {
     try {
       await setWorkerWorking(db, 'aki', 'noteカバー画像を生成中')
       const cover = await runAkiNoteCover(db, r2, apiKey, createdArticleId, createdArticleTitle, createdArticleType)
@@ -566,7 +568,7 @@ ${glossaryNote}${todayFocus}${saleMode && slotDef.slot === 2 ? '\n\n▓追加指
   }
 
   // ========== Phase 6.8: Aki 有料note本文用の図解(最大2枚) → Mio QA → ゲート③でDL ==========
-  if (createdArticleId && ['paid_single', 'membership', 'monthly_summary'].includes(createdArticleType)) {
+  if (IMAGE_GENERATION_ENABLED && createdArticleId && ['paid_single', 'membership', 'monthly_summary'].includes(createdArticleType)) {
     try {
       const art: any = await db.prepare('SELECT body_md FROM note_articles WHERE article_id = ?').bind(createdArticleId).first()
       if (art?.body_md) {
@@ -783,7 +785,7 @@ export async function runHourlyTick(
       .bind(jstToday).first()
     if (!already) {
       result.mode = 'pipeline'
-      result.pipeline = await runDailyPipeline(db, r2, String(env.OPENAI_API_KEY || ''), env)
+      result.pipeline = await runDailyPipeline(db, r2, String(env.ANTHROPIC_API_KEY || ''), env)
       result.ok = result.pipeline.ok
       if (!result.pipeline.ok) result.error = result.pipeline.error
     }
@@ -800,7 +802,7 @@ export async function runHourlyTick(
   //        承認済み返信の送信は毎時(Xキー未設定なら何もしない)
   try {
     if ([8, 12, 18, 22].includes(jstHour)) {
-      result.replies.collect = await collectMentionsAndDraft(db, String(env.OPENAI_API_KEY || ''), env)
+      result.replies.collect = await collectMentionsAndDraft(db, String(env.ANTHROPIC_API_KEY || ''), env)
       if (!result.replies.collect.skippedNoCreds && (result.replies.collect.fetched > 0 || result.replies.collect.errors.length > 0)) {
         await db.prepare(
           "INSERT INTO worker_logs (worker_name, action, status, output_json, finished_at) VALUES ('sora', 'mention_collect', ?, ?, CURRENT_TIMESTAMP)",

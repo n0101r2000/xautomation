@@ -1,7 +1,7 @@
 // Alex(PM): 月曜に週次テーマ分解+曜日別タスク配分(指示書 L126-143 準拠)
 // 入力: ゲート①承認済みネタ + Rui週次改善提案 + 直近KPI。出力: weekly_plans + task_queue
-// 品質優先方針: 週の方向性を決める要のため gpt-5 + 推論high
-import { callOpenAI, type LlmResult } from './llm'
+// 品質優先方針: 週の方向性を決める要のため Opus 5.5 + effort high
+import { callClaude, type LlmResult } from './llm'
 
 export const ALEX_SYSTEM = `あなたは「Alex」— AIバーチャルオフィス「Mさん / 海外AI副業の検証部屋」のプロジェクトマネージャーです。
 毎週月曜に、その週のテーマを決めてワーカーにタスクを配分します。
@@ -133,7 +133,7 @@ ${compText}
 日曜の note_focus は有料記事の企画にしてください。
 ※最優先KPI: Xフォロワーの増加。x_focus は「フォローしたくなる切り口」(検証の続きが気になる・保存したくなる・共感できる)を意識してください。収益目標: まず0→1の初売上を作ること。`
 
-    const llm: LlmResult = await callOpenAI(apiKey, 'gpt-5', ALEX_SYSTEM, userPrompt, 20000, 'high') // 推論(high)トークン込み
+    const llm: LlmResult = await callClaude(apiKey, 'claude-opus-5-5', ALEX_SYSTEM, userPrompt, 20000, 'high') // 推論(high)トークン込み
     if (!llm.ok) {
       result.error = `Alex週次計画失敗: ${llm.error}`
       return result

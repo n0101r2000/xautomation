@@ -1,4 +1,5 @@
-// Aki: 画像生成 (gpt-image-2) + Mio: 画像QA (gpt-5 vision)
+// Aki: 画像生成 (現在OFF) + Mio: 画像QA (Claude vision)
+import { callClaude } from './llm'
 // 指示書07章: ブランドガイド ネイビー#1E3A5F × オレンジ#FF7A45
 
 export type ImagePurpose = 'thumbnail' | 'infographic' | 'note_cover' | 'note_diagram'
@@ -25,7 +26,11 @@ export const IMAGE_SIZE: Record<ImagePurpose, string> = {
   note_diagram: '1536x1024', // note本文内に横長で挿入
 }
 
-// gpt-image-2 の概算コスト (品質mediumベース)
+// 画像生成のON/OFF。Claudeは画像を生成できないため OFF にしている(図解・サムネイル・noteカバーは作らない)
+export const IMAGE_GENERATION_ENABLED = false
+export const IMAGE_GENERATION_DISABLED_MESSAGE = '画像生成はOFFに設定されています'
+
+// 旧 gpt-image-2 の概算コスト。画像生成を再開する場合の試算用に残す
 export const IMAGE_COST_USD = 0.04
 
 export interface ImageGenResult {
@@ -34,31 +39,11 @@ export interface ImageGenResult {
   error?: string
 }
 
-export async function generateImage(apiKey: string, prompt: string, size: string): Promise<ImageGenResult> {
-  if (!apiKey) return { ok: false, error: 'OPENAI_API_KEY が未設定です' }
-  try {
-    const res = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-image-2',
-        prompt,
-        size,
-        quality: 'medium',
-        n: 1,
-      }),
-    })
-    const data: any = await res.json()
-    if (!res.ok) return { ok: false, error: data?.error?.message || `HTTP ${res.status}` }
-    const b64 = data.data?.[0]?.b64_json
-    if (!b64) return { ok: false, error: '画像データが返されませんでした' }
-    return { ok: true, b64 }
-  } catch (e: any) {
-    return { ok: false, error: e?.message || 'ネットワークエラー' }
-  }
+export async function generateImage(_apiKey: string, _prompt: string, _size: string): Promise<ImageGenResult> {
+  return { ok: false, error: IMAGE_GENERATION_DISABLED_MESSAGE }
 }
 
-// ============ Mio 画像QA (GPT-5 vision) ============
+// ============ Mio 画像QA (Claude vision) ============
 
 export const MIO_IMAGE_QA_SYSTEM = `あなたは「Mio」— 日本の法規制とブランドガイドラインに精通した画像QA担当です。SNS投稿用に生成されたAI画像を審査します。
 
@@ -97,41 +82,24 @@ export interface ImageQaResult {
 }
 
 export async function qaImage(apiKey: string, imageB64: string, expectedText: string): Promise<ImageQaResult> {
-  if (!apiKey) return { ok: false, error: 'OPENAI_API_KEY が未設定です' }
+  const llm = await callClaude(
+    apiKey,
+    'claude-opus-5-5',
+    MIO_IMAGE_QA_SYSTEM,
+    [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageB64 } },
+      { type: 'text', text: `この画像を審査してください。画像内に表示されるべきテキスト: 「${expectedText}」` },
+    ],
+    8000,
+    'low',
+  )
+  if (!llm.ok) return { ok: false, error: llm.error }
+  const { content, usage, costUsd } = llm
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-5',
-        messages: [
-          { role: 'system', content: MIO_IMAGE_QA_SYSTEM },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: `この画像を審査してください。画像内に表示されるべきテキスト: 「${expectedText}」` },
-              { type: 'image_url', image_url: { url: `data:image/png;base64,${imageB64}` } },
-            ],
-          },
-        ],
-        max_completion_tokens: 1500,
-        reasoning_effort: 'low',
-      }),
-    })
-    const data: any = await res.json()
-    if (!res.ok) return { ok: false, error: data?.error?.message || `HTTP ${res.status}` }
-    const content = data.choices?.[0]?.message?.content || ''
-    const usage = data.usage
-    // gpt-5 vision入力: 概算 $1.25/1M in + $10/1M out
-    const costUsd = usage ? (usage.prompt_tokens / 1e6) * 1.25 + (usage.completion_tokens / 1e6) * 10 : 0
-    try {
-      const jsonText = content.replace(/^```json?\s*/, '').replace(/```\s*$/, '').trim()
-      const parsed = JSON.parse(jsonText)
-      return { ok: true, ...parsed, usage, costUsd }
-    } catch {
-      return { ok: true, verdict: 'unknown', raw: content, usage, costUsd }
-    }
-  } catch (e: any) {
-    return { ok: false, error: e?.message || 'ネットワークエラー' }
+    const jsonText = content.replace(/^```json?\s*/, '').replace(/```\s*$/, '').trim()
+    const parsed = JSON.parse(jsonText)
+    return { ok: true, ...parsed, usage, costUsd }
+  } catch {
+    return { ok: true, verdict: 'unknown', raw: content, usage, costUsd }
   }
 }

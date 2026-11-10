@@ -3,7 +3,7 @@
 // - runAkiInfographic: 枠3単体の図解生成(旧フロー・手動用に残置)
 // - runAkiNoteCover: noteカバー画像
 // - runAkiNoteDiagrams: 有料note本文用の図解(最大2枚/記事)
-import { callOpenAI } from './llm'
+import { callClaude } from './llm'
 import { buildImagePrompt, generateImage, qaImage, IMAGE_SIZE, IMAGE_COST_USD, type ImagePurpose } from './image-gen'
 
 const AKI_EXTRACT_SYSTEM = `あなたは「Aki」— 日本のXアカウント「Mさん / 海外AI副業の検証部屋」の画像デザイナーです。
@@ -43,9 +43,9 @@ export async function runAkiInfographic(
   const result: AkiResult = { ok: false, costUsd: 0 }
   try {
     // ① 視覚化ポイント抽出
-    const extract = await callOpenAI(
+    const extract = await callClaude(
       apiKey,
-      'gpt-5',
+      'claude-opus-5-5',
       AKI_EXTRACT_SYSTEM,
       `以下のX投稿(枠3: ノウハウ図解)の原稿から図解を設計してください。\n\n▓ネタ: ${topicTitle}\n▓投稿本文:\n${postBody}`,
       4000,
@@ -305,9 +305,9 @@ export async function runAkiImagePlan(
     const postList = posts
       .map((p) => `▓枠${p.slot} (ネタ: ${p.topicTitle})\n${p.body.slice(0, 400)}`)
       .join('\n\n')
-    const plan = await callOpenAI(
+    const plan = await callClaude(
       apiKey,
-      'gpt-5',
+      'claude-opus-5-5',
       AKI_PLAN_SYSTEM,
       `本日の投稿一覧です。画像を添付すべき枠を選び、それぞれの画像を設計してください(最大${maxImages}枚)。\n\n${postList}`,
       8000,
@@ -411,9 +411,9 @@ export async function runAkiNoteDiagrams(
   const result: AkiNoteDiagramResult = { ok: false, generated: 0, imageIds: [], costUsd: 0 }
   try {
     // ① 図解設計
-    const plan = await callOpenAI(
+    const plan = await callClaude(
       apiKey,
-      'gpt-5',
+      'claude-opus-5-5',
       AKI_NOTE_DIAGRAM_SYSTEM,
       `以下のnote記事の本文用図解を設計してください。\n\n▓タイトル: ${articleTitle}\n▓本文:\n${bodyMd.slice(0, 4000)}`,
       6000,
