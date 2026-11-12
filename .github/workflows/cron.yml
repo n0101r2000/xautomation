@@ -1,6 +1,6 @@
 # AI Virtual Office 毎時tick
 # 毎時実行し、サーバー側(JST基準)で処理を振り分け:
-#   - JST 5時台: フルパイプライン(Alex→Riko→Kai→Yuto→Aki→note→Rui→Nana、1日1回ガード付き)
+#   - JST 5時以降の最初のtick: フルパイプライン(Alex→Riko→Kai→Yuto→Aki→note→Rui→Nana、1日1回ガード付き)
 #   - 毎時: Sora自動予約投稿(承認済み+投稿時刻到来分をXへ。Xキー未設定なら何もしない)
 #
 # 【有効化手順】このファイルを .github/workflows/cron.yml に配置し、

@@ -92,6 +92,8 @@ async function resetAllWorkersIdle(db: D1Database) {
 // 二重実行ガード: app_settingsの実行中フラグ(20分で自動失効 — 異常終了でフラグが残っても復旧可能)
 const PIPELINE_LOCK_KEY = 'pipeline_running_at'
 const PIPELINE_LOCK_STALE_MS = 20 * 60 * 1000
+// 毎時tickからの自動実行を試みたJST日付(1日1回だけ試行する)
+const PIPELINE_ATTEMPT_KEY = 'pipeline_auto_attempt_date'
 
 export async function acquirePipelineLock(db: D1Database): Promise<{ acquired: boolean; runningSinceMs?: number }> {
   try {
@@ -638,7 +640,7 @@ ${glossaryNote}${todayFocus}${saleMode && slotDef.slot === 2 ? '\n\n▓追加指
 
 // ============================================================
 // 毎時cronエントリ: 時間帯で処理を振り分け
-//  - JST 5時台: フルパイプライン(1日1回ガード付き)
+//  - JST 5時以降の最初のtick: フルパイプライン(1日1回ガード付き)
 //  - 毎時: Sora自動予約投稿(承認済みの時刻到来分をXへ)
 // ============================================================
 export interface HourlyTickResult {
@@ -774,8 +776,10 @@ export async function runHourlyTick(
     },
   }
 
-  // JST 5時台のみパイプライン(同日重複実行ガード: 今日分のauto_write成功ログがあればスキップ)
-  if (jstHour === 5) {
+  // JST 5時以降の最初のtickでパイプライン(1日1回)。
+  // GitHub Actions の schedule は大幅に遅れたり間引かれたりするため、5時台ちょうどに来なくても後追いで実行する。
+  // 同日重複ガード: 今日分のauto_write成功ログがある、または今日すでに自動実行を試みていればスキップ(失敗時の毎時リトライで課金が膨らむのを防ぐ)
+  if (jstHour >= 5) {
     const already = await db
       .prepare(
         `SELECT id FROM worker_logs
@@ -783,7 +787,12 @@ export async function runHourlyTick(
            AND date(finished_at, '+9 hours') = ? LIMIT 1`,
       )
       .bind(jstToday).first()
-    if (!already) {
+    const lastAttempt: any = await db
+      .prepare('SELECT value FROM app_settings WHERE key = ?')
+      .bind(PIPELINE_ATTEMPT_KEY).first()
+    if (!already && lastAttempt?.value !== jstToday) {
+      await db.prepare('INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)')
+        .bind(PIPELINE_ATTEMPT_KEY, jstToday).run()
       result.mode = 'pipeline'
       result.pipeline = await runDailyPipeline(db, r2, String(env.ANTHROPIC_API_KEY || ''), env)
       result.ok = result.pipeline.ok

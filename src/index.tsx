@@ -858,7 +858,7 @@ app.post('/api/cron/run', async (c) => {
   const provided = auth.startsWith('Bearer ') ? auth.slice(7) : ''
   if (provided !== secret) return c.json({ error: 'unauthorized' }, 401)
 
-  // 毎時tick: JST5時台はフルパイプライン、それ以外は時刻到来分の自動投稿のみ
+  // 毎時tick: JST5時以降の最初の1回はフルパイプライン、それ以外は時刻到来分の自動投稿のみ
   const result = await runHourlyTick(c.env.DB, c.env.R2, c.env as any)
   return c.json(result)
 })
