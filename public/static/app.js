@@ -299,7 +299,8 @@ async function renderApprove() {
   try { cronStatus = (await axios.get('/api/cron/status')).data; } catch (e) {}
   const posts = postsRes.data.posts;
   const topics = topicsRes.data.topics;
-  const notes = notesRes.data.articles.filter((a) => a.approval_status === 'pending');
+  // 承認待ちに加え、「note公開済み」にしたがURL未登録の記事も残す(URL入力欄を出すため)
+  const notes = notesRes.data.articles.filter((a) => a.approval_status === 'pending' || (a.approval_status === 'published' && !a.note_url));
   const approvedPosts = (approvedRes.data.posts || []).filter((p) => !p.published_at);
 
   $app.innerHTML = `
@@ -605,9 +606,13 @@ function noteCard(n) {
       </div>
       <div class="flex gap-2 flex-wrap">
         <button class="note-preview-btn bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-xs font-bold hover:bg-slate-300" data-id="${esc(n.article_id)}"><i class="fas fa-eye mr-1"></i>全文プレビュー</button>
-        <button class="note-publish-btn bg-brand-orange text-white px-4 py-2 rounded-lg text-xs font-bold hover:opacity-90" data-id="${esc(n.article_id)}"><i class="fas fa-paper-plane mr-1"></i>公開する</button>
+        ${published
+          ? '<span class="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-lg text-xs font-bold"><i class="fas fa-check mr-1"></i>note公開済み(URL未登録)</span>'
+          : `<button class="note-publish-btn bg-brand-orange text-white px-4 py-2 rounded-lg text-xs font-bold hover:opacity-90" data-id="${esc(n.article_id)}"><i class="fas fa-check mr-1"></i>note公開済みにする</button>`}
       </div>
     </div>
+    ${!published ? `
+    <p class="mt-2 text-[11px] text-slate-500"><i class="fas fa-circle-info mr-1"></i>手順: 全文プレビュー →「Markdownをコピー」→ noteに貼って公開 →「note公開済みにする」→ URLを登録</p>` : ''}
     ${published && !n.note_url ? `
     <div class="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2">
       <input type="url" class="note-url-input flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-xs" placeholder="noteで公開したらURLを貼り付け → 枠11の告知が実URL連動になります (https://note.com/...)" data-id="${esc(n.article_id)}">
@@ -663,10 +668,10 @@ function bindDecisionButtons() {
   });
   document.querySelectorAll('.note-publish-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      if (!confirm('この記事を公開しますか?')) return;
+      if (!confirm('noteでの公開は終わりましたか?\n(このボタンはnoteに投稿しません。公開済みとして記録し、URL入力欄を出します)')) return;
       try {
         await axios.post(`/api/notes/${btn.dataset.id}/publish`);
-        toast('公開処理をキューに投入しました。noteで公開後、URLを登録してください');
+        toast('公開済みにしました。下の欄にnoteの記事URLを登録してください');
         renderApprove(); updateApprovalBadge();
       } catch (e) {
         toast(e.response?.data?.error || '公開に失敗しました', 'error');
