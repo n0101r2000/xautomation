@@ -35,6 +35,7 @@ export const SOURCES = {
   rss: [
     { url: 'https://www.producthunt.com/feed', name: 'Product Hunt Daily' },
     { url: 'https://www.therundown.ai/feed', name: 'The Rundown AI' },
+    { url: 'https://techcrunch.com/category/artificial-intelligence/feed/', name: 'TechCrunch AI' },
   ] as RssSource[],
 
   // Hacker News 検索(Algolia公開API・認証不要)。直近7日・指定ポイント以上のストーリー
@@ -96,6 +97,22 @@ export function parseFeed(xml: string, sourceName: string, maxItems = 10): RawIt
 const FETCH_TIMEOUT_MS = 10000
 // Reddit API ルールの形式(<platform>:<app id>:<version>)
 const REDDIT_UA = 'web:xautomation-riko:1.0'
+const REDDIT_RETRY_MS = 5000
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// ステータスを見たい呼び出し用(fetchWithTimeout は非2xxを null にしてしまうため)
+async function fetchRaw(url: string, headers: Record<string, string> = {}): Promise<Response | null> {
+  try {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
+    const res = await fetch(url, { headers, signal: ctrl.signal })
+    clearTimeout(timer)
+    return res
+  } catch {
+    return null
+  }
+}
 
 async function fetchWithTimeout(url: string, headers: Record<string, string> = {}): Promise<Response | null> {
   try {
@@ -179,36 +196,22 @@ export async function collectReddit(maxPerSub = 5): Promise<{ items: RawItem[]; 
   for (let i = 0; i < 6 && subs.length > 0; i++) {
     picked.push(subs.splice((dayIndex + i * 7) % subs.length, 1)[0])
   }
-  const results = await Promise.allSettled(
-    picked.map(async (src) => {
-      // Reddit公開JSON API(認証不要)。データセンターIPからは403になることが多いので、失敗したらRSSで取り直す
-      const url = `https://www.reddit.com/r/${src.subreddit}/top.json?t=day&limit=${maxPerSub * 2}`
-      const res = await fetchWithTimeout(url, { 'User-Agent': REDDIT_UA })
-      if (!res) {
-        // RSSはスコア(ups)が取れないため min_upvotes では絞れない。top?t=day の上位をそのまま使う
-        const rss = await fetchWithTimeout(`https://www.reddit.com/r/${src.subreddit}/top/.rss?t=day&limit=${maxPerSub}`, { 'User-Agent': REDDIT_UA })
-        if (!rss) throw new Error(`fetch failed: r/${src.subreddit}`)
-        return parseFeed(await rss.text(), `r/${src.subreddit}`, maxPerSub)
-      }
-      const data: any = await res.json()
-      const posts = (data?.data?.children || []) as any[]
-      return posts
-        .map((p) => p.data)
-        .filter((d) => d && d.ups >= Math.min(src.min_upvotes, 50) && !d.stickied)
-        .slice(0, maxPerSub)
-        .map((d): RawItem => ({
-          title: d.title,
-          url: `https://www.reddit.com${d.permalink}`,
-          source: `r/${src.subreddit}`,
-          score: d.ups,
-          summary: (d.selftext || '').slice(0, 300),
-        }))
-    })
-  )
-  results.forEach((r, i) => {
-    if (r.status === 'fulfilled') items.push(...r.value)
-    else errors.push(`Reddit r/${picked[i].subreddit}: ${r.reason?.message || 'error'}`)
-  })
+  // Reddit は Cloudflare の IP に厳しく、JSON API は常に 403、RSS も2件目以降はほぼ 429 になる(2026-11 実測)。
+  // そこで選んだ subreddit を「r/A+B+C」の1リクエストにまとめて RSS で取り、429 のときだけ1回待って取り直す。
+  // 取れない日は他の情報源(HN・Product Hunt・AIニュース)だけで進む。RSSはスコア(ups)が無いので min_upvotes では絞れない
+  const multi = picked.map((s) => s.subreddit).join('+')
+  const url = `https://www.reddit.com/r/${multi}/top/.rss?t=day&limit=${maxPerSub * picked.length}`
+  try {
+    let res = await fetchRaw(url, { 'User-Agent': REDDIT_UA })
+    if (res?.status === 429) {
+      await sleep(REDDIT_RETRY_MS)
+      res = await fetchRaw(url, { 'User-Agent': REDDIT_UA })
+    }
+    if (!res || !res.ok) throw new Error(`fetch failed (${res?.status ?? 'timeout'})`)
+    items.push(...parseFeed(await res.text(), `Reddit (r/${picked.map((s) => s.subreddit).join(', r/')})`, maxPerSub * picked.length))
+  } catch (e: any) {
+    errors.push(`Reddit r/${multi}: ${e?.message || 'error'}`)
+  }
   return { items, errors }
 }
 

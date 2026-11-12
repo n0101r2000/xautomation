@@ -1,4 +1,4 @@
-# AI Virtual Office 毎時tick
+# AI Virtual Office 毎時tick(手動実行用)
 # 毎時実行し、サーバー側(JST基準)で処理を振り分け:
 #   - JST 5時以降の最初のtick: フルパイプライン(Alex→Riko→Kai→Yuto→Aki→note→Rui→Nana、1日1回ガード付き)
 #   - 毎時: Sora自動予約投稿(承認済み+投稿時刻到来分をXへ。Xキー未設定なら何もしない)
@@ -8,8 +8,8 @@
 name: hourly-tick
 
 on:
-  schedule:
-    - cron: '10 * * * *'   # 毎時10分 (GitHub Actionsのschedule遅延を吸収するため0分は避ける)
+  # 定時実行は Cloudflare Worker(cron-worker/、毎時10分)に移した。GitHub の schedule は遅延・間引きが大きいため。
+  # ここは手動実行(Run workflow)用に残している
   workflow_dispatch: {}
 
 jobs:
