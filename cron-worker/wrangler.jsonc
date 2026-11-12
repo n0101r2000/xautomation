@@ -1,0 +1,12 @@
+{
+  // xautomation 定時実行用 Worker。Pages には Cron Trigger が無いため、この Worker が毎時 /api/cron/run を呼ぶ。
+  // GitHub Actions の schedule は遅延・間引きが大きく(1日3〜4回しか来ない日がある)、こちらに移した。
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "xautomation-cron",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "workers_dev": false,
+  "triggers": { "crons": ["10 * * * *"] },
+  "vars": { "TARGET_URL": "https://xautomation-59a.pages.dev/api/cron/run" }
+  // CRON_SECRET は `npx wrangler secret put CRON_SECRET` で登録(Pages側と同じ値)
+}

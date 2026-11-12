@@ -30,12 +30,19 @@ export const SOURCES = {
     { subreddit: 'PartneredYoutube', min_upvotes: 100, category: 'Faceless動画' },
   ] as RedditSource[],
 
+  // 2026-11: Indie Hackers(403)・Starter Story(406)はRSS配信終了/ボット拒否、hnrss.orgは502のため外した。
+  // Hacker News は公式検索API(Algolia)で取得する(下の hackerNews)
   rss: [
-    { url: 'https://www.indiehackers.com/feed.xml', name: 'Indie Hackers' },
     { url: 'https://www.producthunt.com/feed', name: 'Product Hunt Daily' },
-    { url: 'https://www.starterstory.com/blog.rss', name: 'Starter Story' },
-    { url: 'https://hnrss.org/newest?q=side+hustle+OR+passive+income+OR+AI+business&points=50', name: 'Hacker News (副業関連)' },
+    { url: 'https://www.therundown.ai/feed', name: 'The Rundown AI' },
   ] as RssSource[],
+
+  // Hacker News 検索(Algolia公開API・認証不要)。直近7日・指定ポイント以上のストーリー
+  hackerNews: {
+    queries: ['side hustle', 'passive income', 'AI business', 'solopreneur'],
+    min_points: 30,
+    max_age_days: 7,
+  },
 
   // YouTube Data API キー取得後に有効化(指示書§04)
   youtube: { channel_ids: [] as string[], max_age_hours: 48 },
@@ -87,6 +94,8 @@ export function parseFeed(xml: string, sourceName: string, maxItems = 10): RawIt
 
 // ---- 収集 ----
 const FETCH_TIMEOUT_MS = 10000
+// Reddit API ルールの形式(<platform>:<app id>:<version>)
+const REDDIT_UA = 'web:xautomation-riko:1.0'
 
 async function fetchWithTimeout(url: string, headers: Record<string, string> = {}): Promise<Response | null> {
   try {
@@ -115,7 +124,49 @@ export async function collectRss(maxPerFeed = 8): Promise<{ items: RawItem[]; er
     if (r.status === 'fulfilled') items.push(...r.value)
     else errors.push(`RSS ${SOURCES.rss[i].name}: ${r.reason?.message || 'error'}`)
   })
+  const hn = await collectHackerNews(maxPerFeed)
+  items.push(...hn.items)
+  errors.push(...hn.errors)
   return { items, errors }
+}
+
+// Hacker News: Algolia検索APIでクエリごとに取得し、URL重複を除いてポイント順に返す
+export async function collectHackerNews(maxItems = 8): Promise<{ items: RawItem[]; errors: string[] }> {
+  const { queries, min_points, max_age_days } = SOURCES.hackerNews
+  const since = Math.floor(Date.now() / 1000) - max_age_days * 86400
+  const errors: string[] = []
+  const seen = new Set<string>()
+  const items: RawItem[] = []
+  const results = await Promise.allSettled(
+    queries.map(async (q) => {
+      const url = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(q)}&tags=story&numericFilters=${encodeURIComponent(`points>=${min_points},created_at_i>${since}`)}&hitsPerPage=10`
+      const res = await fetchWithTimeout(url, { 'User-Agent': 'xautomation-riko/1.0' })
+      if (!res) throw new Error(`fetch failed: "${q}"`)
+      const data: any = await res.json()
+      return (data?.hits || []) as any[]
+    }),
+  )
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      errors.push(`Hacker News ${queries[i]}: ${r.reason?.message || 'error'}`)
+      return
+    }
+    for (const h of r.value) {
+      const link = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`
+      if (!h.title || seen.has(link)) continue
+      seen.add(link)
+      items.push({
+        title: h.title,
+        url: link,
+        source: 'Hacker News',
+        score: h.points,
+        summary: (h.story_text || '').replace(/<[^>]+>/g, '').slice(0, 300),
+        published: h.created_at,
+      })
+    }
+  })
+  items.sort((a, b) => (b.score || 0) - (a.score || 0))
+  return { items: items.slice(0, maxItems), errors }
 }
 
 export async function collectReddit(maxPerSub = 5): Promise<{ items: RawItem[]; errors: string[] }> {
@@ -130,10 +181,15 @@ export async function collectReddit(maxPerSub = 5): Promise<{ items: RawItem[]; 
   }
   const results = await Promise.allSettled(
     picked.map(async (src) => {
-      // Reddit公開JSON API(認証不要)
+      // Reddit公開JSON API(認証不要)。データセンターIPからは403になることが多いので、失敗したらRSSで取り直す
       const url = `https://www.reddit.com/r/${src.subreddit}/top.json?t=day&limit=${maxPerSub * 2}`
-      const res = await fetchWithTimeout(url, { 'User-Agent': 'Mozilla/5.0 (compatible; RikoBot/1.0; +https://example.com)' })
-      if (!res) throw new Error(`fetch failed: r/${src.subreddit}`)
+      const res = await fetchWithTimeout(url, { 'User-Agent': REDDIT_UA })
+      if (!res) {
+        // RSSはスコア(ups)が取れないため min_upvotes では絞れない。top?t=day の上位をそのまま使う
+        const rss = await fetchWithTimeout(`https://www.reddit.com/r/${src.subreddit}/top/.rss?t=day&limit=${maxPerSub}`, { 'User-Agent': REDDIT_UA })
+        if (!rss) throw new Error(`fetch failed: r/${src.subreddit}`)
+        return parseFeed(await rss.text(), `r/${src.subreddit}`, maxPerSub)
+      }
       const data: any = await res.json()
       const posts = (data?.data?.children || []) as any[]
       return posts
