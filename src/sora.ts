@@ -4,7 +4,7 @@
 // - 枠6: quote_tweet_id があれば引用RT (投稿直前に生存確認、消えていれば通常投稿)
 // - X APIキー未設定時は何もしない (エラーにしない)
 
-import { getXCredentials, postTweet, uploadMedia, isTransientXError, X_PREMIUM_CHAR_LIMIT, type XCredentials } from './x-api'
+import { getXCredentials, postTweet, postThread, uploadMedia, isTransientXError, xWeightedLength, X_ACCOUNT_PLAN, X_WEIGHT_LIMIT, X_PREMIUM_CHAR_LIMIT, type XCredentials } from './x-api'
 import { verifyTweetAlive } from './sources'
 
 export interface SoraPublishResult {
@@ -49,8 +49,17 @@ export async function publishPostToX(
     // 消えていた場合は通常投稿として本文のみ投稿 (本文は引用なしでも成立する書き方をYutoに指示済み)
   }
 
-  // X Premium加入済み: 長文も1投稿で完結(最大25,000字)。ツリー/スレッド分割は廃止。
-  // 万一上限を超える本文は末尾を安全に切り詰める(通常は発生しない)
+  // 無料プラン: 1投稿 weighted 280 を超える本文(スレッド枠など)はスレッドに分けて投稿する。
+  // 引用RTは1投稿で完結させる(引用RTのスレッド化はしない)
+  if (X_ACCOUNT_PLAN === 'free' && !quoteId && xWeightedLength(post.body) > X_WEIGHT_LIMIT) {
+    const th = await postThread(creds, post.body, mediaIds.length ? mediaIds : undefined)
+    if (!th.ok) return { ok: false, withImage: mediaIds.length > 0, quoted: false, threaded: true, error: th.error }
+    await db.prepare("UPDATE x_posts SET published_at = datetime('now'), buffer_id = ? WHERE post_id = ?")
+      .bind(th.tweetIds[0], post.post_id).run()
+    return { ok: true, tweetId: th.tweetIds[0], tweetUrl: th.tweetUrl, withImage: mediaIds.length > 0, quoted: false, threaded: true, threadCount: th.posted }
+  }
+
+  // Premium: 長文も1投稿で完結(最大25,000字)。万一上限を超える本文は末尾を安全に切り詰める
   const body = [...post.body].length > X_PREMIUM_CHAR_LIMIT
     ? [...post.body].slice(0, X_PREMIUM_CHAR_LIMIT - 1).join('') + '…'
     : post.body

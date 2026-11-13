@@ -18,37 +18,43 @@ import { embedAffiliateLinks, resolveClickBase, type AffiliateLink } from './aff
 import { collectMentionsAndDraft, publishApprovedReplies, type ReplyCollectResult, type ReplyPublishResult } from './replies'
 import { runSlotOptimize, loadSlotOverrides } from './slot-optimizer'
 import { runPostRecycle } from './recycle'
-import { getXCredentials, retweet, fetchMyProfile, fetchMyTweetsMetrics } from './x-api'
+import { getXCredentials, retweet, fetchMyProfile, fetchMyTweetsMetrics, overLimitParts } from './x-api'
 
-// 12枠タイムテーブル(X Premium加入・長文1投稿完結型・フォロワー獲得最優先)
-// 短文と長文をメリハリよく配置: 長文読み物は通勤/昼/夜のゴールデンタイムに、短文は合間の接触頻度維持に
+// 12枠タイムテーブル(X 無料プラン運用・フォロワー獲得最優先)
+// 無料プランは1投稿 全角140字(weighted 280)まで。枠4・10だけ3〜5本のスレッドにし、残りは140字以内の単発投稿
 export const SLOT_TABLE: { slot: number; time: string; type: string; limit: string }[] = [
-  { slot: 1, time: '06:30', type: '朝の海外ニュース解説', limit: '400〜800字' },
+  { slot: 1, time: '06:30', type: '朝の海外ニュース解説', limit: '110字以内+出典URL' },
   { slot: 2, time: '07:30', type: '1日の予告', limit: '100字前後' },
-  { slot: 3, time: '09:00', type: 'ノウハウ図解1枚', limit: '150字前後+画像' },
-  { slot: 4, time: '11:00', type: '徹底解説長文(バズ狙い)', limit: '1500〜3000字' },
-  { slot: 5, time: '12:15', type: '昼休みTips', limit: '150字前後' },
+  { slot: 3, time: '09:00', type: 'ノウハウ図解1枚', limit: '120字以内' },
+  { slot: 4, time: '11:00', type: '徹底解説スレッド(バズ狙い)', limit: 'スレッド4〜5本・各130字以内' },
+  { slot: 5, time: '12:15', type: '昼休みTips', limit: '130字以内' },
   { slot: 6, time: '14:00', type: '引用RT', limit: '100字前後' },
-  { slot: 7, time: '16:00', type: 'ケーススタディ分解', limit: '600〜1200字' },
-  { slot: 8, time: '18:00', type: 'ツール比較・アフィ', limit: '400〜800字' },
+  { slot: 7, time: '16:00', type: 'ケーススタディ分解', limit: '130字以内' },
+  { slot: 8, time: '18:00', type: 'ツール比較・アフィ', limit: '100字以内(リンク・#PRは後で付く)' },
   { slot: 9, time: '19:30', type: '質問投げかけ', limit: '100字前後' },
-  { slot: 10, time: '21:00', type: '実践報告・検証記録', limit: '800〜1500字' },
-  { slot: 11, time: '22:30', type: 'note告知', limit: '150字前後' },
+  { slot: 10, time: '21:00', type: '検証記録スレッド', limit: 'スレッド3〜4本・各130字以内' },
+  { slot: 11, time: '22:30', type: 'note告知', limit: '100字以内+URL' },
   { slot: 12, time: '23:30', type: '深夜の一言', limit: '100字前後' },
 ]
 
-// 枠ごとの型ヒント(Yutoプロンプトに注入)— ツリー/スレッド分割は全廃、長文は1投稿に読みやすくまとめる
+// スレッドで書く枠
+export const THREAD_SLOTS = [4, 10]
+
+// スレッド枠の出力形式(splitForThread が行頭の「n/m」で分割する)
+const THREAD_FORMAT = '各投稿の先頭行に「1/4」「2/4」のように番号を書き、投稿と投稿の間は空行1つで区切る。番号を含めて各投稿130字以内。1本目だけ読んでも「続きを読みたい」と思える書き出しにする。最後の投稿は自分の正直な感想で締める'
+
+// 枠ごとの型ヒント(Yutoプロンプトに注入)
 const SLOT_HINTS: Record<number, string> = {
-  1: '海外のニュースを紹介して、それが日本の会社員にどう関係あるかまで噛み砕く。冒頭1行で「何の話か」がわかるように。要点は行間を空けて整理し、数字を1つ以上入れる。最後に出典URL',
+  1: '海外のニュースを1つ紹介し、日本の会社員にどう関係あるかを一言で。数字を1つ入れる。本文110字以内のあと、最後の行に出典URLだけを書く',
   2: '今日発信する内容の予告。かしこまらず、朝の挨拶がてら軽く。100字前後',
   3: '図解画像を添付する前提の導入文。画像を見たくなる一言+図解の要点をひとこと',
-  4: '【最重要枠・バズ狙い】1つのテーマを1投稿で徹底解説する長文(1500〜3000字)。冒頭2行で「読むと何がわかるか」を提示して足を止めさせる。見出し代わりの【】行と空行で区切り、スマホで流し読みできる構成に。途中に具体的な数字・手順・実例を入れ、最後は自分の正直な感想で締める。番号付きの「1/」「2/」のようなスレッド形式は絶対に使わない',
+  4: `【最重要枠・バズ狙い】1つのテーマを4〜5本のスレッドで解説する。1本目で「読むと何がわかるか」を示して足を止めさせ、途中に具体的な数字・手順・実例を入れる。${THREAD_FORMAT}`,
   5: '昼休みに30秒で読める軽いTips。難しい言葉を使わない',
   6: '話題ツイートを引用RTするコメント。100字前後',
-  7: '海外の成功/失敗事例を1投稿で分解(600〜1200字)。「何がうまくいった(いかなかった)要因か」を僕の目線で。空行で段落を区切る',
-  8: 'ツール比較を1投稿で(400〜800字)。それぞれの良し悪しを正直に。アフィリエイトリンク想定のため文末に #PR を明記',
+  7: '海外の成功/失敗事例を1つ取り上げ、「何がうまくいった(いかなかった)か」の要因を1つに絞って僕の目線で書く。130字以内',
+  8: 'ツールを2つ比べて、それぞれの良し悪しを正直に一言ずつ。100字以内(アフィリエイトリンクと #PR は後工程で自動で付くので本文には書かない)',
   9: '読者への質問で終える。副業をやったことがない人でも答えられる身近な問い',
-  10: '一人称の実践報告・検証記録(800〜1500字)。「実際にやってみたらこうだった」を時系列で。うまくいかなかった部分も正直に書く',
+  10: `検証記録を3〜4本のスレッドで書く。調べた・試したことを時系列で、うまくいかなかった部分も正直に。実際にやっていない体験は書かず、「調べてわかったこと」として書く。${THREAD_FORMAT}`,
   11: 'note記事への誘導。売り込み感を出しすぎない',
   12: '1日の締めの一言。生活感や本音をこぼす',
 }
@@ -404,8 +410,9 @@ ${markdown.slice(0, 2500)}
 ▓参考: 既存の用語注釈集(同じ固有名詞はこの注釈を使う)
 ${glossaryNote}${todayFocus}${saleMode && slotDef.slot === 2 ? '\n\n▓追加指示: 本日は有料noteの発売直後です。1日の予告の中で「夜にnoteの話をします」的な自然な前振りを1文入れる' : ''}`
 
-    // 長文枠(4/7/10)は最大3000字の本文+推論分でトークン予算を拡大
-    const isLongSlot = [4, 7, 10].includes(slotDef.slot)
+    // スレッド枠(4/10)は複数投稿ぶんの本文+推論でトークン予算を拡大
+    const isThreadSlot = THREAD_SLOTS.includes(slotDef.slot)
+    const isLongSlot = isThreadSlot
     const written = await callClaude(apiKey, 'claude-opus-5-5', YUTO_SYSTEM, userPrompt, isLongSlot ? 10000 : 3000, isLongSlot ? 'medium' : 'low')
     if (!written.ok) {
       result.yuto.errors.push(`枠${slotDef.slot}: ${written.error}`)
@@ -433,10 +440,25 @@ ${glossaryNote}${todayFocus}${saleMode && slotDef.slot === 2 ? '\n\n▓追加指
         }
       }
     }
-    result.mio.checked++
-    if (qa.status === 'ok') result.mio.ok++
-    else if (qa.status === 'needs_fix') result.mio.needsFix++
-    else result.mio.ng++
+    // 文字数ガード(X無料プラン: 1投稿 weighted 280 = 全角140字)。超えていたら1回だけ短縮させる
+    if (overLimitParts(body, isThreadSlot).length > 0) {
+      const shorten = await callClaude(
+        apiKey,
+        'claude-opus-5-5',
+        YUTO_SYSTEM,
+        `以下の投稿はXの無料プランの上限(1投稿 全角140字)を超えています。内容と口調を保ったまま、${isThreadSlot ? '「1/4」のような番号形式と空行区切りを維持し、番号を含めて各投稿120字以内' : '1投稿で120字以内(URLがあれば残す)'}に縮めてください。縮めた本文のみを出力:\n\n${body}`,
+        isLongSlot ? 10000 : 3000,
+      )
+      if (shorten.ok) {
+        result.yuto.costUsd += shorten.costUsd || 0
+        const qa3 = runQaCheck(shorten.content, slotDef.slot === 8 || /\bhttps?:\/\//.test(shorten.content))
+        const fewer = overLimitParts(shorten.content, isThreadSlot).length < overLimitParts(body, isThreadSlot).length
+        if (fewer && (qa3.status !== 'ng' || qa.status === 'ng')) {
+          body = shorten.content
+          qa = qa3
+        }
+      }
+    }
 
     // 枠8(ツール比較・アフィ枠): 登録済みアフィリンクをQA後の本文に自動埋め込み
     // リンク0件・ツール名不一致なら何も変えずそのまま(未登録でも正常動作)
@@ -450,6 +472,17 @@ ${glossaryNote}${todayFocus}${saleMode && slotDef.slot === 2 ? '\n\n▓追加指
         }
       } catch { /* 埋め込み失敗でも投稿は継続 */ }
     }
+
+    // それでも上限を超える投稿は「要修正」にして、承認画面で気づけるようにする
+    const over = overLimitParts(body, isThreadSlot)
+    if (over.length > 0) {
+      qa.issues.push({ law: '文字数', matched: over.map((w) => `${w}/280`).join(', '), detail: 'X無料プランの上限(全角140字)を超えています。短くしてから投稿してください' } as any)
+      if (qa.status === 'ok') qa.status = 'needs_fix'
+    }
+    result.mio.checked++
+    if (qa.status === 'ok') result.mio.ok++
+    else if (qa.status === 'needs_fix') result.mio.needsFix++
+    else result.mio.ng++
 
     const postId = `p-auto-${Date.now()}-${slotDef.slot}`
     try {

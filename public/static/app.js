@@ -12,7 +12,7 @@ const STATUS_CLS = {
 };
 const DOT_CLS = { idle: 'bg-gray-300', working: 'bg-blue-500', error: 'bg-red-500' };
 const GATE_JA = { weekly_planning: '週次企画', daily_posts: '日次投稿', paid_note: '有料note' };
-const SLOT_NAMES = ['', '朝のニュース速報', '1日の予告', 'ノウハウ図解', 'バズ狙いスレッド', '昼休みTips', '引用RT', 'ケーススタディ分解', 'ツール比較・アフィ', '質問投げかけ', '実践報告・失敗談', 'note告知', '深夜の一言'];
+const SLOT_NAMES = ['', '朝のニュース速報', '1日の予告', 'ノウハウ図解', 'バズ狙いスレッド', '昼休みTips', '引用RT', 'ケーススタディ分解', 'ツール比較・アフィ', '質問投げかけ', '検証記録スレッド', 'note告知', '深夜の一言'];
 const SLOT_TIMES = ['', '06:30', '07:30', '09:00', '11:00', '12:15', '14:00', '16:00', '18:00', '19:30', '21:00', '22:30', '23:30'];
 
 // 実際の予約時刻(scheduled_atはUTC保存)をJST表示。P1-5の時間最適化でデフォルトとずれても正しく出る
@@ -358,9 +358,9 @@ async function renderApprove() {
           <span class="text-xs font-bold text-brand-navy bg-slate-100 px-2 py-1 rounded">枠${p.slot_number} ${slotTimeLabel(p)}</span>
           ${qaBadge(p.qa_status, p.qa_issues)}
         </div>
-        <p class="text-sm whitespace-pre-wrap leading-relaxed flex-1">${esc(p.body)}</p>
+        ${postBodyHtml(p.body, true)}
         <div class="flex gap-2 pt-1">
-          <button class="copy-post-btn flex-1 bg-slate-100 text-slate-700 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-200" data-body="${esc(p.body).replace(/"/g, '&quot;')}"><i class="fas fa-copy mr-1"></i>コピーして投稿</button>
+          ${splitThreadParts(p.body).length > 1 ? '' : `<button class="copy-post-btn flex-1 bg-slate-100 text-slate-700 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-200" data-body="${esc(p.body).replace(/"/g, '&quot;')}"><i class="fas fa-copy mr-1"></i>コピーして投稿</button>`}
           ${xStatus.connected ? `<button class="publish-x-btn flex-1 bg-black text-white py-1.5 rounded-lg text-xs font-bold hover:opacity-80" data-id="${esc(p.post_id)}"><i class="fab fa-x-twitter mr-1"></i>Xへ自動投稿</button>` : ''}
         </div>
       </article>`).join('')}</div>`
@@ -439,6 +439,20 @@ async function renderApprove() {
       await navigator.clipboard.writeText(btn.dataset.body);
       toast('コピーしました。Xアプリに貼り付けて投稿してください');
       window.open('https://x.com/compose/post', '_blank');
+    });
+  });
+  // スレッドの各投稿: 1本目は新規投稿画面を開く。2本目以降は直前の投稿への返信として貼る
+  document.querySelectorAll('.copy-part-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(btn.dataset.body);
+      const n = Number(btn.dataset.index);
+      if (n === 1) {
+        toast('1本目をコピーしました。Xに貼り付けて投稿してください');
+        window.open('https://x.com/compose/post', '_blank');
+      } else {
+        toast(`${n}本目をコピーしました。${n - 1}本目の投稿に「返信」で貼り付けてください`);
+      }
+      btn.classList.add('bg-emerald-100', 'text-emerald-700');
     });
   });
 
@@ -537,6 +551,37 @@ function qaBadge(qa_status, qa_issues) {
   return '<span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">QA待ち</span>';
 }
 
+// ===== X 無料プラン対応: 文字数(weighted)とスレッド分割 =====
+// 文字数は上の xWeightedLength / X_WEIGHT_LIMIT(280 = 全角140字)を使う
+// 行頭の「1/4」「2/」等で投稿ごとに分ける(サーバー側 splitNumberedParts と同じ)
+function splitThreadParts(body) {
+  return String(body || '').trim().split(/\n(?=\s*\d{1,2}\/(?:\d{1,2})?\s*)/).map((s) => s.trim()).filter(Boolean);
+}
+function weightBadge(text) {
+  const w = xWeightedLength(text);
+  const over = w > X_WEIGHT_LIMIT;
+  return `<span class="text-[10px] font-bold ${over ? 'text-red-600' : 'text-slate-400'}">${Math.ceil(w / 2)}/140字${over ? ' ⚠️ 超過(短くしないと投稿できません)' : ''}</span>`;
+}
+// 本文表示。スレッドなら1本ずつ枠で区切り、withCopy なら各投稿にコピーボタンを付ける
+function postBodyHtml(body, withCopy) {
+  const parts = splitThreadParts(body);
+  if (parts.length <= 1) {
+    return `<p class="text-sm whitespace-pre-wrap leading-relaxed flex-1">${esc(body)}</p><div class="text-right">${weightBadge(body)}</div>`;
+  }
+  return `<div class="flex-1 space-y-2">
+    <div class="text-[11px] font-bold text-sky-700"><i class="fas fa-reply-all mr-1"></i>スレッド ${parts.length}本 — 1本目を投稿し、2本目以降は直前の投稿に「返信」でつなげます</div>
+    ${parts.map((t, i) => `
+    <div class="border-l-4 border-sky-300 bg-sky-50/40 rounded-r-lg p-2">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[10px] font-bold text-sky-700">${i + 1}本目${i === 0 ? '(新規投稿)' : '(返信)'}</span>
+        ${weightBadge(t)}
+      </div>
+      <p class="text-sm whitespace-pre-wrap leading-relaxed">${esc(t)}</p>
+      ${withCopy ? `<button class="copy-part-btn mt-1 w-full bg-slate-100 text-slate-700 py-1 rounded text-xs font-bold hover:bg-slate-200" data-index="${i + 1}" data-body="${esc(t).replace(/"/g, '&quot;')}"><i class="fas fa-copy mr-1"></i>${i + 1}本目をコピー</button>` : ''}
+    </div>`).join('')}
+  </div>`;
+}
+
 function postCard(p) {
   let issues = [];
   try { issues = JSON.parse(p.qa_issues || '[]'); } catch (e) {}
@@ -549,7 +594,7 @@ function postCard(p) {
       <span class="text-xs font-bold text-brand-navy bg-slate-100 px-2 py-1 rounded">枠${p.slot_number} ${slotTimeLabel(p)} ${esc(SLOT_NAMES[p.slot_number])}${p.recycled_from ? ' ♻️リサイクル' : ''}</span>
       ${qaBadge(p.qa_status, p.qa_issues)}
     </div>
-    <p class="text-sm whitespace-pre-wrap leading-relaxed flex-1">${esc(p.body)}</p>
+    ${postBodyHtml(p.body, false)}
     ${p.quote_tweet_id ? `<div class="quote-source bg-sky-50 border border-sky-200 rounded-lg p-2 text-xs">
       <div class="flex items-center justify-between mb-1">
         <span class="font-bold text-sky-700"><i class="fas fa-quote-left mr-1"></i>引用元ツイート ${esc(p.quote_author || '')}</span>
@@ -559,7 +604,7 @@ function postCard(p) {
       <p class="text-[10px] text-slate-400 mt-1">※承認するとこのツイートへの引用RTとして投稿されます(投稿時に削除済みなら通常投稿に自動切替)</p>
     </div>` : ''}
     ${imageUrls.length ? `<div class="flex gap-2">${imageUrls.map((u) => `<img src="${esc(u)}" alt="添付図解" class="h-32 rounded-lg border border-slate-200 object-cover cursor-pointer" onclick="window.open('${esc(u)}', '_blank')">`).join('')}<span class="text-[10px] text-slate-400 self-end">🎨 Aki生成図解(クリックで拡大)</span></div>` : ''}
-    ${issues.length ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-800">${issues.map((i) => `<div><b>[${esc(i.rule)}]</b> ${esc(i.detail)}</div>`).join('')}</div>` : ''}
+    ${issues.length ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-800">${issues.map((i) => `<div><b>[${esc(i.rule || i.law)}]</b> ${esc(i.matched || "")} ${esc(i.detail)}</div>`).join("")}</div>` : ""}
     ${isAffiliateSlot ? `<button class="embed-affiliate-btn w-full bg-brand-orange/10 text-brand-orange border border-brand-orange/40 py-1.5 rounded-lg text-xs font-bold hover:bg-brand-orange/20" data-id="${esc(p.post_id)}"><i class="fas fa-link mr-1"></i>アフィリンクを自動埋め込み</button>` : ''}
     ${p.qa_status === 'needs_fix' || p.qa_status === 'ng' ? `<button class="llm-rewrite-btn w-full bg-purple-50 text-purple-700 border border-purple-300 py-1.5 rounded-lg text-xs font-bold hover:bg-purple-100" data-id="${esc(p.post_id)}"><i class="fas fa-wand-magic-sparkles mr-1"></i>Yuto(AI)にリライトさせる</button>` : ''}
     <div class="flex gap-2 pt-1">

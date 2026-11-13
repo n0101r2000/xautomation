@@ -5,7 +5,7 @@ import { embedAffiliateLinks, resolveClickBase, suggestAnnotations, type Affilia
 import { computeCostPlan } from './model-plan'
 import { callClaude, YUTO_SYSTEM, MIO_SYSTEM } from './llm'
 import { buildImagePrompt, generateImage, qaImage, IMAGE_SIZE, IMAGE_COST_USD, IMAGE_GENERATION_ENABLED, IMAGE_GENERATION_DISABLED_MESSAGE, type ImagePurpose } from './image-gen'
-import { getXCredentials, xWeightedLength, X_WEIGHT_LIMIT } from './x-api'
+import { getXCredentials, xWeightedLength, X_WEIGHT_LIMIT, splitNumberedParts } from './x-api'
 import { runRikoCrawl } from './riko'
 import { runDailyPipeline, runHourlyTick, runSelfRepost, SLOT_TABLE } from './cron'
 import { publishPostToX, runSoraScheduledPublish } from './sora'
@@ -549,10 +549,15 @@ app.post('/api/posts/:id/rewrite', async (c) => {
 
   const issues = post.qa_issues ? JSON.parse(post.qa_issues) : []
   const issueText = issues.length
-    ? issues.map((i: any) => `- ${i.law || ''} ${i.reason || i.message || ''}`).join('\n')
+    ? issues.map((i: any) => `- ${i.law || ''} ${i.matched || ''} ${i.reason || i.message || i.detail || ''}`).join('\n')
     : '(特になし。より読みやすく・法令遵守で磨いてください)'
 
-  const userPrompt = `以下の投稿文を、QA指摘を解消するように書き直してください。元のネタ・構成は活かすこと。\n\n▓元の投稿:\n${post.body}\n\n▓QA指摘:\n${issueText}`
+  // スレッド形式(行頭「1/4」など)の投稿は形式を保ったまま、各投稿を無料プランの上限内に収める
+  const isThread = splitNumberedParts(post.body).length > 1
+  const lengthRule = isThread
+    ? '「1/4」のような番号形式と空行区切りを保ち、番号を含めて各投稿120字以内にする'
+    : '1投稿で120字以内にする(URLがあれば残す)'
+  const userPrompt = `以下の投稿文を、QA指摘を解消するように書き直してください。元のネタ・構成は活かすこと。Xは無料プランなので${lengthRule}。書き直した本文のみを出力。\n\n▓元の投稿:\n${post.body}\n\n▓QA指摘:\n${issueText}`
   const result = await callClaude(c.env.ANTHROPIC_API_KEY || '', 'claude-opus-5-5', YUTO_SYSTEM, userPrompt, 3000)
   if (!result.ok) return c.json({ error: result.error }, 502)
 

@@ -101,10 +101,23 @@ export function xWeightedLength(text: string): number {
 
 export const X_WEIGHT_LIMIT = 280
 
-// X Premium(有料プラン)加入済み: 1投稿あたり最大25,000文字まで投稿可能
-// 通常投稿は長文1本で完結させる(ツリー/スレッド分割は廃止)
-// リプライは従来どおり280 weighted(短文で十分なため)
+// 運用中のXのプラン。'free' は1投稿 weighted 280 まで(長い本文はスレッドに分けて投稿)、
+// 'premium' は1投稿で最大25,000字。有料プランに入ったら 'premium' に変える
+export const X_ACCOUNT_PLAN: 'free' | 'premium' = 'free'
+
+// X Premium(有料プラン)の1投稿あたりの上限
 export const X_PREMIUM_CHAR_LIMIT = 25000
+
+// スレッド形式の本文を、行頭の「1/4」「2/」等の番号で投稿ごとに分ける(番号が無ければ1投稿として返す)
+export function splitNumberedParts(text: string): string[] {
+  return text.trim().split(/\n(?=\s*\d{1,2}\/(?:\d{1,2})?\s*)/).map((s) => s.trim()).filter(Boolean)
+}
+
+// 上限(weighted 280)を超える投稿の weighted 長を返す(空なら全て収まっている)
+export function overLimitParts(text: string, isThread: boolean): number[] {
+  const parts = isThread ? splitNumberedParts(text) : [text.trim()]
+  return parts.map(xWeightedLength).filter((w) => w > X_WEIGHT_LIMIT)
+}
 
 // 一時的エラー判定(共通): 一時的なら次回リトライに残す、恒久ならrejected化する
 // - 日本語/英語両方のネットワークエラーメッセージに対応(Workers実環境のfetch例外は英語)
